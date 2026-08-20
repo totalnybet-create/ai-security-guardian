@@ -46,6 +46,7 @@ class PacketFlowExtractor(
         bytes: ByteArray,
         packet: ParsedIpPacket,
     ): DnsMessageMetadata? {
+        if (packet.fragmented) return null
         if (packet.protocol != NetworkProtocol.UDP) return null
         if (packet.destinationPort != DNS_PORT && packet.sourcePort != DNS_PORT) return null
         val offset = packet.transportPayloadOffset ?: return null
