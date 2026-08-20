@@ -12,6 +12,10 @@
         android:usesCleartextTraffic="false">
 
         <activity
+            android:name=".CopilotActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".NetworkGuardActivity"
             android:exported="false" />
 
