@@ -22,6 +22,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":voice-core"))
+    api(project(":voice-core"))
     implementation("androidx.core:core-ktx:1.17.0")
 }
