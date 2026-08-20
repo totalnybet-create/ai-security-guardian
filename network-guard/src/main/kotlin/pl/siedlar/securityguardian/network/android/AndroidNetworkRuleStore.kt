@@ -15,14 +15,15 @@ class AndroidNetworkRuleStore(
         "network-guard-rules-v1",
         Context.MODE_PRIVATE,
     )
-    private val localIocs = AndroidDomainIocStore(appContext).load()
+    private val iocStore = AndroidDomainIocStore(appContext)
     private val iocPolicyAdapter = DomainIocPolicyAdapter()
 
     /** Effective rules used by the DNS enforcement path. */
     fun list(): List<NetworkRule> {
         val now = System.currentTimeMillis()
         val temporary = listTemporaryAllowRules(now)
-        return (listUserRules() + temporary + iocPolicyAdapter.toRules(localIocs, now))
+        val iocRules = iocPolicyAdapter.toRules(iocStore.load(), now)
+        return (listUserRules() + temporary + iocRules)
             .sortedWith(compareByDescending<NetworkRule> { it.priority }.thenBy { it.id })
     }
 
@@ -40,12 +41,21 @@ class AndroidNetworkRuleStore(
         }
         .sortedBy(NetworkRule::domainSuffix)
 
+    fun isUserBlockedDomain(domain: String): Boolean {
+        val normalized = normalizeDomain(domain) ?: return false
+        return preferences
+            .getStringSet(KEY_BLOCKED_DOMAINS, emptySet())
+            .orEmpty()
+            .any { stored -> normalizeDomain(stored) == normalized }
+    }
+
     fun addBlockedDomain(domain: String): NetworkRule {
         val normalized = normalizeDomain(domain)
             ?: throw IllegalArgumentException("Nieprawidłowa domena")
         val next = preferences
             .getStringSet(KEY_BLOCKED_DOMAINS, emptySet())
             .orEmpty()
+            .mapNotNull(::normalizeDomain)
             .toMutableSet()
             .apply { add(normalized) }
         check(preferences.edit().putStringSet(KEY_BLOCKED_DOMAINS, next).commit()) {
@@ -89,10 +99,11 @@ class AndroidNetworkRuleStore(
     fun remove(ruleId: String): Boolean {
         val prefix = "block-domain:"
         if (!ruleId.startsWith(prefix)) return false
-        val domain = ruleId.removePrefix(prefix)
+        val domain = normalizeDomain(ruleId.removePrefix(prefix)) ?: return false
         val next = preferences
             .getStringSet(KEY_BLOCKED_DOMAINS, emptySet())
             .orEmpty()
+            .mapNotNull(::normalizeDomain)
             .toMutableSet()
         if (!next.remove(domain)) return false
         return preferences.edit().putStringSet(KEY_BLOCKED_DOMAINS, next).commit()
