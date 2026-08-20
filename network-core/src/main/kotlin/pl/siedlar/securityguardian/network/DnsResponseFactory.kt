@@ -3,7 +3,11 @@ package pl.siedlar.securityguardian.network
 class DnsResponseFactory(
     private val parser: DnsMessageParser = DnsMessageParser(),
 ) {
-    fun nxdomain(query: ByteArray): ByteArray? {
+    fun nxdomain(query: ByteArray): ByteArray? = errorResponse(query, RCODE_NXDOMAIN)
+
+    fun serverFailure(query: ByteArray): ByteArray? = errorResponse(query, RCODE_SERVFAIL)
+
+    private fun errorResponse(query: ByteArray, responseCode: Int): ByteArray? {
         val metadata = parser.parseUdpPayload(query) ?: return null
         if (metadata.isResponse) return null
         val copyLength = metadata.wireQuestionSectionLength
@@ -13,7 +17,7 @@ class DnsResponseFactory(
         val originalFlags = u16(response, 2)
         val opcode = originalFlags and 0x7800
         val recursionDesired = originalFlags and 0x0100
-        val responseFlags = 0x8000 or opcode or recursionDesired or 0x0080 or RCODE_NXDOMAIN
+        val responseFlags = 0x8000 or opcode or recursionDesired or 0x0080 or responseCode
         put16(response, 2, responseFlags)
         put16(response, 6, 0)
         put16(response, 8, 0)
@@ -29,6 +33,7 @@ class DnsResponseFactory(
     }
 
     private companion object {
+        const val RCODE_SERVFAIL = 2
         const val RCODE_NXDOMAIN = 3
     }
 }
