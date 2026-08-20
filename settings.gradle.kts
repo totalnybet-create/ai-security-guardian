@@ -20,6 +20,7 @@ include(
     ":app",
     ":core-security",
     ":app-inspector",
+    ":privacy-guard",
     ":audit-log",
     ":notifications",
 )
