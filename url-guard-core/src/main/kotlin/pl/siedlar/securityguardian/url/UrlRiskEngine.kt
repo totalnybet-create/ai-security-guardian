@@ -49,7 +49,8 @@ class UrlRiskEngine(
     private val brands = protectedBrands.map(::normalizeBrand)
 
     fun assess(rawInput: String): UrlAssessment {
-        val input = rawInput.trim().take(MAX_INPUT_CHARS)
+        val trimmedInput = rawInput.trim()
+        val input = trimmedInput.take(MAX_INPUT_CHARS)
         if (input.isBlank()) return malformed(rawInput, "empty_url")
 
         val uri = runCatching { URI(input) }.getOrNull()
@@ -98,7 +99,7 @@ class UrlRiskEngine(
             evidence += nestedRedirectEvidence(uri, host)
         }
 
-        if (input.length >= MAX_INPUT_CHARS) {
+        if (trimmedInput.length > MAX_INPUT_CHARS) {
             evidence += UrlEvidence("input_truncated", "Only the bounded URL prefix was analyzed.", 10)
         }
 
