@@ -11,21 +11,30 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import pl.siedlar.securityguardian.core.RiskLevel
 import pl.siedlar.securityguardian.malware.FileDisposition
 import pl.siedlar.securityguardian.malware.MalwareAssessment
+import pl.siedlar.securityguardian.quarantine.QuarantineRecord
 
 class FileScanActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,9 +61,41 @@ class FileScanActivity : ComponentActivity() {
             }.start()
         }
 
+        fun runQuarantine(removeOriginal: Boolean) {
+            val uri = sharedUri ?: return
+            val complete = state.value as? FileScanUiState.Complete ?: return
+            if (complete.quarantining) return
+            state.value = complete.copy(quarantining = true)
+
+            Thread {
+                val result = runCatching {
+                    controller.quarantine(
+                        uri = uri,
+                        assessment = complete.assessment,
+                        removeOriginalAfterVerifiedCopy = removeOriginal,
+                    )
+                }
+                runOnUiThread {
+                    state.value = result.fold(
+                        onSuccess = { record -> complete.copy(quarantining = false, quarantineRecord = record) },
+                        onFailure = { error ->
+                            complete.copy(
+                                quarantining = false,
+                                quarantineError = error.message ?: "Nie udało się wykonać operacji sejfu.",
+                            )
+                        },
+                    )
+                }
+            }.start()
+        }
+
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
-                FileScanScreen(state.value)
+                FileScanScreen(
+                    state = state.value,
+                    onVaultCopy = { runQuarantine(removeOriginal = false) },
+                    onContainOriginal = { runQuarantine(removeOriginal = true) },
+                )
             }
         }
     }
@@ -72,12 +113,22 @@ class FileScanActivity : ComponentActivity() {
 
 private sealed interface FileScanUiState {
     data object Scanning : FileScanUiState
-    data class Complete(val assessment: MalwareAssessment) : FileScanUiState
+    data class Complete(
+        val assessment: MalwareAssessment,
+        val quarantining: Boolean = false,
+        val quarantineRecord: QuarantineRecord? = null,
+        val quarantineError: String? = null,
+    ) : FileScanUiState
+
     data class Error(val message: String) : FileScanUiState
 }
 
 @Composable
-private fun FileScanScreen(state: FileScanUiState) {
+private fun FileScanScreen(
+    state: FileScanUiState,
+    onVaultCopy: () -> Unit,
+    onContainOriginal: () -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFFF7F8FA),
@@ -122,20 +173,57 @@ private fun FileScanScreen(state: FileScanUiState) {
                     }
                 }
 
-                is FileScanUiState.Complete -> FileAssessmentCard(state.assessment)
+                is FileScanUiState.Complete -> FileAssessmentCard(
+                    state = state,
+                    onVaultCopy = onVaultCopy,
+                    onContainOriginal = onContainOriginal,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun FileAssessmentCard(assessment: MalwareAssessment) {
+private fun FileAssessmentCard(
+    state: FileScanUiState.Complete,
+    onVaultCopy: () -> Unit,
+    onContainOriginal: () -> Unit,
+) {
+    val assessment = state.assessment
+    var showContainConfirmation by remember { mutableStateOf(false) }
     val actionText = when (assessment.recommendedDisposition) {
         FileDisposition.ALLOW -> "Brak sygnałów wymagających blokady w aktualnym zakresie analizy."
         FileDisposition.WATCH -> "Nie otwieraj pochopnie. Wymagana jest dodatkowa weryfikacja."
         FileDisposition.BLOCK -> "Nie otwieraj tego pliku do czasu dodatkowej weryfikacji."
         FileDisposition.QUARANTINE -> "Traktuj plik jako wysokiego ryzyka i nie otwieraj go."
         FileDisposition.DELETE -> "Usunięcie wymaga osobnego, jednoznacznego potwierdzenia użytkownika."
+    }
+
+    if (showContainConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showContainConfirmation = false },
+            title = { Text("Odizolować oryginał?") },
+            text = {
+                Text(
+                    "Guardian najpierw zapisze kopię w prywatnym sejfie i sprawdzi SHA-256. Dopiero po poprawnej weryfikacji spróbuje usunąć oryginalny dokument. Jeśli Android lub dostawca pliku nie pozwoli na usunięcie, wynik będzie VAULT_COPY_ONLY, a nie fałszywe CONTAINED.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showContainConfirmation = false
+                        onContainOriginal()
+                    },
+                ) {
+                    Text("POTWIERDZAM IZOLACJĘ")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showContainConfirmation = false }) {
+                    Text("ANULUJ")
+                }
+            },
+        )
     }
 
     Card(
@@ -162,6 +250,43 @@ private fun FileAssessmentCard(assessment: MalwareAssessment) {
 
             assessment.evidence.take(5).forEach { evidence ->
                 Text("• ${evidence.detail}", style = MaterialTheme.typography.bodySmall)
+            }
+
+            if (state.quarantining) {
+                CircularProgressIndicator()
+                Text("Weryfikuję kopię sejfu…")
+            } else {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onVaultCopy,
+                ) {
+                    Text("KOPIA DO SEJFU")
+                }
+
+                if (assessment.riskLevel == RiskLevel.HIGH || assessment.riskLevel == RiskLevel.CRITICAL) {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showContainConfirmation = true },
+                    ) {
+                        Text("ODIZOLUJ ORYGINAŁ")
+                    }
+                }
+            }
+
+            state.quarantineRecord?.let { record ->
+                Text(
+                    "Sejf: ${record.outcome.name}",
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(record.detail, style = MaterialTheme.typography.bodySmall)
+            }
+
+            state.quarantineError?.let { error ->
+                Text(
+                    "Operacja sejfu nie została ukończona: $error",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
