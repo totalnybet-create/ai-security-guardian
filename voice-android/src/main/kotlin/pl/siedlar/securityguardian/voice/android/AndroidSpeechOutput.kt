@@ -2,6 +2,8 @@ package pl.siedlar.securityguardian.voice.android
 
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -18,6 +20,7 @@ class AndroidSpeechOutput(
     private val onState: (VoiceSessionState) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
+    private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var ready = false
     @Volatile private var outputMode = SpeechOutputMode.UNAVAILABLE
     private var selectedVoice: Voice? = null
@@ -28,27 +31,27 @@ class AndroidSpeechOutput(
             if (status != TextToSpeech.SUCCESS) {
                 ready = false
                 outputMode = SpeechOutputMode.UNAVAILABLE
-                onState(VoiceSessionState.ERROR)
+                emitState(VoiceSessionState.ERROR)
                 return@TextToSpeech
             }
             configureVoice()
         }.also { engine ->
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    onState(VoiceSessionState.SPEAKING)
+                    emitState(VoiceSessionState.SPEAKING)
                 }
 
                 override fun onDone(utteranceId: String?) {
-                    onState(VoiceSessionState.IDLE)
+                    emitState(VoiceSessionState.IDLE)
                 }
 
                 @Deprecated("Deprecated by platform callback shape")
                 override fun onError(utteranceId: String?) {
-                    onState(VoiceSessionState.ERROR)
+                    emitState(VoiceSessionState.ERROR)
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
-                    onState(VoiceSessionState.ERROR)
+                    emitState(VoiceSessionState.ERROR)
                 }
             })
         }
@@ -82,7 +85,7 @@ class AndroidSpeechOutput(
 
     fun stop() {
         runCatching { tts?.stop() }
-        onState(VoiceSessionState.IDLE)
+        emitState(VoiceSessionState.IDLE)
     }
 
     fun shutdown() {
@@ -92,6 +95,7 @@ class AndroidSpeechOutput(
         tts = null
         selectedVoice = null
         outputMode = SpeechOutputMode.UNAVAILABLE
+        mainHandler.removeCallbacksAndMessages(null)
     }
 
     private fun configureVoice() {
@@ -130,7 +134,7 @@ class AndroidSpeechOutput(
         if (!configured) {
             ready = false
             outputMode = SpeechOutputMode.UNAVAILABLE
-            onState(VoiceSessionState.ERROR)
+            emitState(VoiceSessionState.ERROR)
             return
         }
 
@@ -143,7 +147,11 @@ class AndroidSpeechOutput(
             }
         }
         ready = true
-        onState(VoiceSessionState.IDLE)
+        emitState(VoiceSessionState.IDLE)
+    }
+
+    private fun emitState(state: VoiceSessionState) {
+        mainHandler.post { onState(state) }
     }
 
     companion object {
