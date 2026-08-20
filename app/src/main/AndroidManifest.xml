@@ -12,11 +12,23 @@
         android:usesCleartextTraffic="false">
 
         <activity
+            android:name=".NetworkGuardActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".QuarantineActivity"
             android:exported="false" />
 
         <activity
             android:name=".FileScanActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UrlGuardActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ShareRouterActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

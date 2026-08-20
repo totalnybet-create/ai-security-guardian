@@ -25,6 +25,9 @@ include(
     ":file-scanner",
     ":quarantine",
     ":install-guard",
+    ":network-core",
+    ":network-guard",
+    ":url-guard-core",
     ":audit-log",
     ":notifications",
 )

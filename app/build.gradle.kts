@@ -12,8 +12,8 @@ android {
         applicationId = "pl.siedlar.securityguardian"
         minSdk = 23
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0-p2"
+        versionCode = 4
+        versionName = "0.4.0-p3"
     }
 
     buildFeatures {
@@ -51,6 +51,8 @@ dependencies {
     implementation(project(":file-scanner"))
     implementation(project(":quarantine"))
     implementation(project(":install-guard"))
+    implementation(project(":network-guard"))
+    implementation(project(":url-guard-core"))
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
