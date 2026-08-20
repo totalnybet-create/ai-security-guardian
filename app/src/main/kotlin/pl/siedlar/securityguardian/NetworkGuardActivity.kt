@@ -29,6 +29,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -84,13 +85,17 @@ class NetworkGuardActivity : ComponentActivity() {
                     },
                     onAddDomain = { domain ->
                         runCatching { ruleStore.addBlockedDomain(domain) }
-                            .onSuccess {
-                                inputError = null
-                                refresh()
-                            }
-                            .onFailure { error ->
-                                inputError = error.message ?: "Nie udało się dodać domeny"
-                            }
+                            .fold(
+                                onSuccess = {
+                                    inputError = null
+                                    refresh()
+                                    true
+                                },
+                                onFailure = { error ->
+                                    inputError = error.message ?: "Nie udało się dodać domeny"
+                                    false
+                                },
+                            )
                     },
                     onRemoveRule = { ruleId ->
                         ruleStore.remove(ruleId)
@@ -131,10 +136,10 @@ private fun NetworkGuardScreen(
     inputError: String?,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
-    onAddDomain: (String) -> Unit,
+    onAddDomain: (String) -> Boolean,
     onRemoveRule: (String) -> Unit,
 ) {
-    var domain by mutableStateOf("")
+    var domain by remember { mutableStateOf("") }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -221,8 +226,7 @@ private fun NetworkGuardScreen(
                             modifier = Modifier.fillMaxWidth(),
                             enabled = domain.isNotBlank(),
                             onClick = {
-                                onAddDomain(domain)
-                                if (inputError == null) domain = ""
+                                if (onAddDomain(domain)) domain = ""
                             },
                         ) {
                             Text("DODAJ REGUŁĘ BLOCK")
