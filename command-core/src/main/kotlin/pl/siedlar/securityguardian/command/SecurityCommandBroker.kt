@@ -83,6 +83,11 @@ class SecurityCommandBroker(
             return BrokerResult.Denied(request, decision)
         }
 
+        val executor = executorByAction[request.action]
+            ?: return deniedMissingImplementation(request, decision, "No executor registered for ${request.action}")
+        val verifier = verifierByAction[request.action]
+            ?: return deniedMissingImplementation(request, decision, "No verifier registered for ${request.action}")
+
         if (decision.policy.humanGate != HumanGate.NONE) {
             val approvalError = validateApproval(request, decision.policy, approval)
             if (approvalError != null) {
@@ -96,11 +101,6 @@ class SecurityCommandBroker(
                 return BrokerResult.AwaitingHumanGate(request, decision.policy, approvalError)
             }
         }
-
-        val executor = executorByAction[request.action]
-            ?: return deniedMissingImplementation(request, decision, "No executor registered for ${request.action}")
-        val verifier = verifierByAction[request.action]
-            ?: return deniedMissingImplementation(request, decision, "No verifier registered for ${request.action}")
 
         val execution = runCatching { executor.execute(request) }
             .getOrElse { error ->
