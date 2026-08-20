@@ -1,6 +1,7 @@
 package pl.siedlar.securityguardian
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +22,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
@@ -74,6 +76,9 @@ class MainActivity : ComponentActivity() {
                                 )
                             runOnUiThread { scanState = nextState }
                         }.start()
+                    },
+                    onVault = {
+                        startActivity(Intent(this, QuarantineActivity::class.java))
                     },
                 )
             }
@@ -144,6 +149,7 @@ private sealed interface ScanUiState {
 private fun GuardianScreen(
     state: ScanUiState,
     onScan: () -> Unit,
+    onVault: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -163,7 +169,7 @@ private fun GuardianScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Zweryfikowany zakres P1: aplikacje i prywatność. Pozostałe warstwy są dodawane etapami.",
+                    text = "Zweryfikowany zakres P1: aplikacje i prywatność. P2 dodaje lokalne skanowanie plików, APK, Install Guard i sejf kwarantanny; Android build pozostaje osobną bramką weryfikacji.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -185,6 +191,15 @@ private fun GuardianScreen(
                     } else {
                         Text("SKANUJ CAŁY TELEFON")
                     }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onVault,
+                ) {
+                    Text("SEJF ZAGROŻEŃ")
                 }
             }
 
