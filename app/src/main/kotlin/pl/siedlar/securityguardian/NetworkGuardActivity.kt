@@ -118,7 +118,7 @@ class NetworkGuardActivity : ComponentActivity() {
 
     private fun refresh() {
         status = controller.status()
-        rules = ruleStore.list()
+        rules = ruleStore.listUserRules()
     }
 
     private fun scheduleRefreshes() {
@@ -214,7 +214,12 @@ private fun NetworkGuardScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Zablokowane domeny", fontWeight = FontWeight.Bold)
+                        Text("Własne reguły blokowania", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Lokalne IOC Guardiana są oceniane oddzielnie i nie można ich przypadkowo usunąć z tej listy.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = domain,
