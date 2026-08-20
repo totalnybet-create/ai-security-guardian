@@ -3,7 +3,6 @@ package pl.siedlar.securityguardian.network.android
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Build
-import android.os.Process
 import android.system.OsConstants
 import pl.siedlar.securityguardian.network.NetworkProtocol
 import pl.siedlar.securityguardian.network.ParsedIpPacket
@@ -43,7 +42,7 @@ class AndroidFlowOwnerResolver(
                 InetSocketAddress(InetAddress.getByName(localIp), localPort),
                 InetSocketAddress(InetAddress.getByName(remoteIp), remotePort),
             )
-        }.getOrNull()?.takeIf { it != Process.INVALID_UID }
+        }.getOrNull()?.takeIf { it >= 0 }
             ?: return FlowOwner(uid = null, packageName = null, ambiguous = false)
 
         val packages = packageManager.getPackagesForUid(uid)
