@@ -1,9 +1,9 @@
 package pl.siedlar.securityguardian.network.android
 
 import android.content.Context
+import pl.siedlar.securityguardian.network.DomainIocPolicyAdapter
 import pl.siedlar.securityguardian.network.NetworkAction
 import pl.siedlar.securityguardian.network.NetworkRule
-import pl.siedlar.securityguardian.network.ThreatVerdict
 import java.net.IDN
 import java.util.Locale
 
@@ -16,10 +16,12 @@ class AndroidNetworkRuleStore(
         Context.MODE_PRIVATE,
     )
     private val localIocs = AndroidDomainIocStore(appContext).load()
+    private val iocPolicyAdapter = DomainIocPolicyAdapter()
 
     /** Effective rules used by the DNS enforcement path. */
-    fun list(): List<NetworkRule> = (listUserRules() + activeIocRules())
-        .sortedWith(compareByDescending<NetworkRule> { it.priority }.thenBy { it.id })
+    fun list(): List<NetworkRule> = (
+        listUserRules() + iocPolicyAdapter.toRules(localIocs, System.currentTimeMillis())
+        ).sortedWith(compareByDescending<NetworkRule> { it.priority }.thenBy { it.id })
 
     /** User-managed rules shown in the UI. IOC-derived rules are intentionally not removable here. */
     fun listUserRules(): List<NetworkRule> = preferences
@@ -66,25 +68,6 @@ class AndroidNetworkRuleStore(
         return preferences.edit().putStringSet(KEY_BLOCKED_DOMAINS, next).commit()
     }
 
-    private fun activeIocRules(nowEpochMs: Long = System.currentTimeMillis()): List<NetworkRule> = localIocs
-        .asSequence()
-        .filter { ioc -> ioc.expiresAtEpochMs == null || ioc.expiresAtEpochMs > nowEpochMs }
-        .mapNotNull { ioc ->
-            val action = when {
-                ioc.verdict == ThreatVerdict.MALICIOUS && ioc.confidence >= MALICIOUS_BLOCK_THRESHOLD -> NetworkAction.BLOCK
-                ioc.verdict == ThreatVerdict.SUSPICIOUS && ioc.confidence >= SUSPICIOUS_ASK_THRESHOLD -> NetworkAction.ASK
-                else -> return@mapNotNull null
-            }
-            NetworkRule(
-                id = "ioc:${ioc.id}",
-                action = action,
-                domainSuffix = ioc.domain,
-                priority = if (action == NetworkAction.BLOCK) IOC_BLOCK_PRIORITY else IOC_ASK_PRIORITY,
-                expiresAtEpochMs = ioc.expiresAtEpochMs,
-            )
-        }
-        .toList()
-
     private fun normalizeDomain(value: String): String? = runCatching {
         IDN.toASCII(value.trim().trimEnd('.'), IDN.USE_STD3_ASCII_RULES)
             .lowercase(Locale.ROOT)
@@ -98,9 +81,5 @@ class AndroidNetworkRuleStore(
     private companion object {
         const val KEY_BLOCKED_DOMAINS = "blocked-domains"
         const val USER_BLOCK_PRIORITY = 100
-        const val IOC_BLOCK_PRIORITY = 900
-        const val IOC_ASK_PRIORITY = 800
-        const val MALICIOUS_BLOCK_THRESHOLD = 80
-        const val SUSPICIOUS_ASK_THRESHOLD = 60
     }
 }
