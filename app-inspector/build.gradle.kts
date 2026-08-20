@@ -23,4 +23,6 @@ android {
 
 dependencies {
     implementation(project(":core-security"))
+    implementation(project(":privacy-guard"))
+    implementation("androidx.core:core-ktx:1.17.0")
 }
