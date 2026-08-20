@@ -28,6 +28,8 @@ include(
     ":network-core",
     ":network-guard",
     ":url-guard-core",
+    ":command-core",
+    ":ai-copilot-core",
     ":audit-log",
     ":notifications",
 )
