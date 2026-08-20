@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "pl.siedlar.securityguardian.notifications"
+    namespace = "pl.siedlar.securityguardian.installguard"
     compileSdk = 36
 
     defaultConfig {
@@ -23,7 +23,7 @@ android {
 
 dependencies {
     implementation(project(":core-security"))
-    implementation(project(":privacy-guard"))
-    implementation(project(":malware-core"))
-    implementation("androidx.core:core-ktx:1.17.0")
+    implementation(project(":app-inspector"))
+    implementation(project(":audit-log"))
+    implementation(project(":notifications"))
 }

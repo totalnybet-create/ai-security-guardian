@@ -4,11 +4,26 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".GuardianApplication"
         android:allowBackup="false"
         android:label="AI Security Guardian"
         android:supportsRtl="true"
         android:theme="@style/Theme.SecurityGuardian"
         android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".QuarantineActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".FileScanActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".MainActivity"
