@@ -29,6 +29,7 @@ include(
     ":network-guard",
     ":url-guard-core",
     ":command-core",
+    ":command-android",
     ":ai-copilot-core",
     ":audit-log",
     ":notifications",
