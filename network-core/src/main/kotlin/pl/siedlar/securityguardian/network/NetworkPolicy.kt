@@ -25,14 +25,14 @@ enum class ThreatVerdict {
 }
 
 data class NetworkFlow(
-    val appPackage: String,
+    val appPackage: String?,
     val destinationHost: String?,
     val destinationIp: String?,
     val destinationPort: Int?,
     val protocol: NetworkProtocol,
 ) {
     init {
-        require(appPackage.isNotBlank())
+        require(appPackage == null || appPackage.isNotBlank())
         destinationPort?.let { require(it in 1..65535) }
     }
 }
@@ -51,6 +51,7 @@ data class NetworkRule(
 ) {
     init {
         require(id.isNotBlank())
+        require(appPackage == null || appPackage.isNotBlank())
         destinationPort?.let { require(it in 1..65535) }
         if (action == NetworkAction.TEMPORARY_ALLOW) {
             require(expiresAtEpochMs != null) { "TEMPORARY_ALLOW requires an expiry" }
