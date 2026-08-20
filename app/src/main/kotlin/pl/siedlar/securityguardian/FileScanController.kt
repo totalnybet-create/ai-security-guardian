@@ -12,6 +12,8 @@ import pl.siedlar.securityguardian.malware.MalwareAssessment
 import pl.siedlar.securityguardian.malware.MalwareAssessmentService
 import pl.siedlar.securityguardian.malware.MalwareRiskEngine
 import pl.siedlar.securityguardian.notifications.AndroidMalwareAlertSink
+import pl.siedlar.securityguardian.quarantine.AndroidFileQuarantine
+import pl.siedlar.securityguardian.quarantine.QuarantineRecord
 
 class FileScanController(
     context: Context,
@@ -28,9 +30,21 @@ class FileScanController(
         ),
         apkArchiveInspector = AndroidApkArchiveInspector(appContext),
     )
+    private val quarantine = AndroidFileQuarantine(appContext)
 
     fun scan(uri: Uri): MalwareAssessment = scanner.scan(
         uri = uri,
         trustedSource = false,
+    )
+
+    fun quarantine(
+        uri: Uri,
+        assessment: MalwareAssessment,
+        removeOriginalAfterVerifiedCopy: Boolean,
+    ): QuarantineRecord = quarantine.quarantine(
+        uri = uri,
+        expectedSha256 = assessment.artifact.sha256,
+        displayName = assessment.artifact.displayName,
+        removeOriginalAfterVerifiedCopy = removeOriginalAfterVerifiedCopy,
     )
 }
