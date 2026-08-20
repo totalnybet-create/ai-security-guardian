@@ -56,7 +56,7 @@ class SecurityPolicyEngine(
             return PolicyDecision(
                 type = PolicyDecisionType.DENY_CAPABILITY,
                 policy = policy,
-                reason = "Missing capabilities: ${missing.sortedBy(Enum<*>::name).joinToString()}.",
+                reason = "Missing capabilities: ${missing.sortedBy { it.name }.joinToString()}.",
             )
         }
 
