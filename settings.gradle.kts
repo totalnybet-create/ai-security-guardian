@@ -26,6 +26,7 @@ include(
     ":quarantine",
     ":install-guard",
     ":network-core",
+    ":network-guard",
     ":audit-log",
     ":notifications",
 )
