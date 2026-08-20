@@ -22,18 +22,24 @@ import pl.siedlar.securityguardian.network.PacketParseStatus
 import pl.siedlar.securityguardian.network.UdpIpResponseBuilder
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class GuardianDnsVpnService : VpnService() {
     private val running = AtomicBoolean(false)
     private val writeLock = Any()
+    private val lastOverloadAuditAt = AtomicLong(0L)
     private var tun: ParcelFileDescriptor? = null
     private var input: FileInputStream? = null
     private var output: FileOutputStream? = null
     private var readerExecutor: ExecutorService? = null
-    private var workers: ExecutorService? = null
+    private var workers: ThreadPoolExecutor? = null
 
     private val packetParser by lazy { IpPacketParser() }
     private val dnsParser by lazy { DnsMessageParser() }
@@ -64,9 +70,15 @@ class GuardianDnsVpnService : VpnService() {
             readerExecutor = Executors.newSingleThreadExecutor { runnable ->
                 Thread(runnable, "guardian-dns-tun").apply { isDaemon = true }
             }
-            workers = Executors.newFixedThreadPool(4) { runnable ->
-                Thread(runnable, "guardian-dns-worker").apply { isDaemon = true }
-            }
+            workers = ThreadPoolExecutor(
+                WORKER_COUNT,
+                WORKER_COUNT,
+                0L,
+                TimeUnit.MILLISECONDS,
+                ArrayBlockingQueue(WORK_QUEUE_CAPACITY),
+                { runnable -> Thread(runnable, "guardian-dns-worker").apply { isDaemon = true } },
+                ThreadPoolExecutor.AbortPolicy(),
+            )
             readerExecutor?.execute(::runTunnel)
         }
         return START_STICKY
@@ -130,7 +142,11 @@ class GuardianDnsVpnService : VpnService() {
                 val count = input?.read(buffer) ?: break
                 if (count <= 0) continue
                 val packet = buffer.copyOf(count)
-                workers?.execute { processDnsPacket(packet) }
+                try {
+                    workers?.execute { processDnsPacket(packet) }
+                } catch (_: RejectedExecutionException) {
+                    respondServfailOnOverload(packet)
+                }
             }
         } catch (error: Throwable) {
             if (running.get()) {
@@ -206,9 +222,14 @@ class GuardianDnsVpnService : VpnService() {
                     result = "NXDOMAIN"
                 }
 
+                NetworkAction.ASK -> {
+                    responsePayload = dnsResponseFactory.serverFailure(query)
+                        ?: return auditMalformedDns(parsed.destinationIp)
+                    result = "ASK_PENDING_SERVFAIL"
+                }
+
                 NetworkAction.ALLOW,
                 NetworkAction.TEMPORARY_ALLOW,
-                NetworkAction.ASK,
                 -> {
                     val upstream = dnsForwarder.forward(query).getOrNull()
                     val validUpstream = upstream?.takeIf { answer ->
@@ -229,22 +250,45 @@ class GuardianDnsVpnService : VpnService() {
             }
 
             val domain = dns.questions.first().name
-            val risk = if (decision.action == NetworkAction.BLOCK) RiskLevel.LOW else RiskLevel.SAFE
-            auditEvent(
-                event = if (decision.action == NetworkAction.BLOCK) "NETWORK_DNS_BLOCKED" else "NETWORK_DNS_RESOLVED",
-                source = domain,
-                risk = risk,
-                action = decision.action.name,
-                result = result,
-                evidence = listOfNotNull(
-                    "domain=$domain",
-                    owner.uid?.let { "uid=$it" },
-                    owner.packageName?.let { "package=$it" },
-                    "owner_ambiguous=${owner.ambiguous}",
-                    decision.matchedRuleId?.let { "rule=$it" },
-                ),
-                verification = "DNS response packet was generated and written to TUN",
-            )
+            when {
+                decision.action == NetworkAction.BLOCK -> auditEvent(
+                    event = "NETWORK_DNS_BLOCKED",
+                    source = domain,
+                    risk = RiskLevel.LOW,
+                    action = decision.action.name,
+                    result = result,
+                    evidence = listOfNotNull(
+                        "domain=$domain",
+                        owner.uid?.let { "uid=$it" },
+                        owner.packageName?.let { "package=$it" },
+                        "owner_ambiguous=${owner.ambiguous}",
+                        decision.matchedRuleId?.let { "rule=$it" },
+                    ),
+                    verification = "NXDOMAIN response packet was generated and written to TUN",
+                )
+
+                decision.action == NetworkAction.ASK -> auditEvent(
+                    event = "NETWORK_DNS_ASK_PENDING",
+                    source = domain,
+                    risk = RiskLevel.MEDIUM,
+                    action = "ASK",
+                    result = result,
+                    evidence = listOf("domain=$domain"),
+                    verification = "Connection was not silently allowed while an ASK decision is unresolved",
+                )
+
+                result == "SERVFAIL" -> auditEvent(
+                    event = "NETWORK_DNS_UPSTREAM_FAILED",
+                    source = domain,
+                    risk = RiskLevel.LOW,
+                    action = decision.action.name,
+                    result = result,
+                    evidence = emptyList(),
+                    verification = "Client received explicit SERVFAIL; no block verdict was claimed",
+                )
+
+                else -> Unit // Privacy-by-design: ordinary successful DNS resolutions are not persisted.
+            }
         } catch (error: Throwable) {
             auditEvent(
                 event = "DNS_GUARD_PACKET_FAILED",
@@ -254,6 +298,41 @@ class GuardianDnsVpnService : VpnService() {
                 result = "FAILED",
                 evidence = listOf(error.message ?: error::class.java.simpleName),
                 verification = "No successful enforcement claim emitted",
+            )
+        }
+    }
+
+    private fun respondServfailOnOverload(packetBytes: ByteArray) {
+        val parsed = packetParser.parse(packetBytes)
+        if (
+            parsed.status != PacketParseStatus.PARSED ||
+            parsed.fragmented ||
+            parsed.protocol != NetworkProtocol.UDP ||
+            parsed.destinationPort != DNS_PORT ||
+            parsed.destinationIp != VIRTUAL_DNS_IPV4
+        ) return
+
+        val offset = parsed.transportPayloadOffset ?: return
+        val length = parsed.transportPayloadLength ?: return
+        if (offset < 0 || length < 0 || offset + length > packetBytes.size) return
+        val query = packetBytes.copyOfRange(offset, offset + length)
+        val responsePayload = dnsResponseFactory.serverFailure(query) ?: return
+        val response = responseBuilder.buildResponse(packetBytes, parsed, responsePayload) ?: return
+        synchronized(writeLock) {
+            runCatching { output?.write(response) }
+        }
+
+        val now = System.currentTimeMillis()
+        val previous = lastOverloadAuditAt.get()
+        if (now - previous >= OVERLOAD_AUDIT_INTERVAL_MS && lastOverloadAuditAt.compareAndSet(previous, now)) {
+            auditEvent(
+                event = "DNS_GUARD_OVERLOADED",
+                source = "network-guard",
+                risk = RiskLevel.MEDIUM,
+                action = "QUEUE_REJECT",
+                result = "SERVFAIL",
+                evidence = listOf("queue_capacity=$WORK_QUEUE_CAPACITY", "workers=$WORKER_COUNT"),
+                verification = "Overload returned bounded SERVFAIL instead of unbounded queue growth",
             )
         }
     }
@@ -363,5 +442,8 @@ class GuardianDnsVpnService : VpnService() {
         private const val VIRTUAL_DNS_IPV4 = "10.77.0.2"
         private const val DNS_PORT = 53
         private const val MAX_PACKET_SIZE = 65_535
+        private const val WORKER_COUNT = 4
+        private const val WORK_QUEUE_CAPACITY = 128
+        private const val OVERLOAD_AUDIT_INTERVAL_MS = 60_000L
     }
 }
