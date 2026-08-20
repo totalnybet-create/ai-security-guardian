@@ -4,13 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
+import pl.siedlar.securityguardian.core.AppInventorySource
 import pl.siedlar.securityguardian.privacy.ObservationState
 import pl.siedlar.securityguardian.privacy.PrivacyInventorySource
 import pl.siedlar.securityguardian.privacy.PrivacySnapshot
 
 class AndroidPrivacyInspector(
     private val context: Context,
-    private val appInspector: AndroidAppInspector = AndroidAppInspector(context),
+    private val appInventory: AppInventorySource = AndroidAppInspector(context),
 ) : PrivacyInventorySource {
     override fun collect(): List<PrivacySnapshot> {
         val enabledNotificationListeners = runCatching {
@@ -19,7 +20,7 @@ class AndroidPrivacyInspector(
 
         val powerManager = context.getSystemService(PowerManager::class.java)
 
-        return appInspector.collect().map { app ->
+        return appInventory.collect().map { app ->
             PrivacySnapshot(
                 packageName = app.packageName,
                 label = app.label,
