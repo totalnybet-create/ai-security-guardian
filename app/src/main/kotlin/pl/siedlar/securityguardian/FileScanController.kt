@@ -43,8 +43,7 @@ class FileScanController(
         removeOriginalAfterVerifiedCopy: Boolean,
     ): QuarantineRecord = quarantine.quarantine(
         uri = uri,
-        expectedSha256 = assessment.artifact.sha256,
-        displayName = assessment.artifact.displayName,
+        assessment = assessment,
         removeOriginalAfterVerifiedCopy = removeOriginalAfterVerifiedCopy,
     )
 }
