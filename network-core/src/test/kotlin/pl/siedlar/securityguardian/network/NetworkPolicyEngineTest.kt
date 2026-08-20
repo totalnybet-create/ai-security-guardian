@@ -29,6 +29,22 @@ class NetworkPolicyEngineTest {
     }
 
     @Test
+    fun providerFailureBecomesUnknownEvidence() {
+        val threatEngine = CompositeNetworkThreatEngine(
+            listOf(
+                object : NetworkThreatProvider {
+                    override val id: String = "broken-provider"
+                    override fun lookup(flow: NetworkFlow): ThreatEvidence = error("offline")
+                },
+            ),
+        )
+        val evidence = threatEngine.lookup(flow)
+        assertEquals(1, evidence.size)
+        assertEquals(ThreatVerdict.UNKNOWN, evidence.single().verdict)
+        assertEquals(NetworkAction.ALLOW, engine.decide(flow, emptyList(), evidence, 1_000L).action)
+    }
+
+    @Test
     fun maliciousReputationOverridesAllowRule() {
         val decision = engine.decide(
             flow = flow,
@@ -92,6 +108,31 @@ class NetworkPolicyEngineTest {
             nowEpochMs = 1_000L,
         )
         assertEquals(NetworkAction.ALLOW, decision.action)
+    }
+
+    @Test
+    fun domainCanonicalizationHandlesCaseTrailingDotAndIdn() {
+        val caseFlow = flow.copy(destinationHost = "API.Example.COM.")
+        assertEquals(
+            NetworkAction.BLOCK,
+            engine.decide(
+                caseFlow,
+                listOf(NetworkRule(id = "case", action = NetworkAction.BLOCK, domainSuffix = "example.com.")),
+                emptyList(),
+                1_000L,
+            ).action,
+        )
+
+        val idnFlow = flow.copy(destinationHost = "api.xn--bcher-kva.example")
+        assertEquals(
+            NetworkAction.BLOCK,
+            engine.decide(
+                idnFlow,
+                listOf(NetworkRule(id = "idn", action = NetworkAction.BLOCK, domainSuffix = "bücher.example")),
+                emptyList(),
+                1_000L,
+            ).action,
+        )
     }
 
     @Test
