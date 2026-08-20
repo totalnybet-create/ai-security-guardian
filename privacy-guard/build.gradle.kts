@@ -7,6 +7,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core-security"))
     testImplementation(kotlin("test-junit"))
 }
 
