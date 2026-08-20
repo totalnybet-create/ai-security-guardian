@@ -63,6 +63,8 @@ Android implementation added but still awaiting Android SDK compiler/device veri
 - real Android HIGH/CRITICAL malware notification sink,
 - `quarantine` Android module with verified private-vault copy, SHA-256 re-verification, `CONTAINED` / `VAULT_COPY_ONLY` / `FAILED` outcomes, restore verification, and persistent incident metadata,
 - explicit Human Gate before original-document deletion,
+- private Quarantine/Sejf screen with persisted records after restart and restore-to-user-selected-destination flow,
+- dashboard entry into the Quarantine/Sejf screen,
 - `install-guard` Android module with process-level package broadcasts and process-start reconciliation,
 - lightweight install baseline (`packageName + lastUpdateTime`) so unchanged packages are not fully rehashed on every process start,
 - duplicate update suppression for `PACKAGE_ADDED(EXTRA_REPLACING=true)` followed by `PACKAGE_REPLACED`,
@@ -74,7 +76,8 @@ Static review performed after these additions:
 - no `TODO` placeholders were found in the PR diff,
 - quarantine destructive removal is gated by explicit confirmation,
 - Android package-install monitoring does not use a false manifest receiver for package broadcasts restricted by Android 8+ background rules,
-- APK `BOOT_COMPLETED` receiver declaration is not claimed from `PackageManager` archive parsing because intent-filter actions are not exposed by that path.
+- APK `BOOT_COMPLETED` receiver declaration is not claimed from `PackageManager` archive parsing because intent-filter actions are not exposed by that path,
+- app module directly depends on `malware-core`, `file-scanner`, `quarantine`, and `install-guard`, and `GuardianApplication` starts Install Guard at process startup.
 
 Important invariants:
 
@@ -99,5 +102,4 @@ Still pending before P2 can be called production-verified:
 - emulator/device installation and regression tests,
 - full binary AndroidManifest intent-filter parsing if boot-receiver evidence is required,
 - concrete external reputation provider integrations or a signed local threat-intelligence feed,
-- restore UI flow using a user-selected writable destination,
-- full dashboard integration of malware/quarantine/install-guard state.
+- final UI/UX polish after the first real APK/device run.
