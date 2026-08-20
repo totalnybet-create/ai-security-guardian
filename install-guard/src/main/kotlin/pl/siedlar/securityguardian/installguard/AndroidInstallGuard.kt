@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.os.Build
 import pl.siedlar.securityguardian.audit.JsonlAuditLogger
 import pl.siedlar.securityguardian.core.AppAssessment
@@ -31,6 +33,7 @@ class AndroidInstallGuard(
     private val onFinding: (InstallGuardFinding) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
+    private val packageManager = appContext.packageManager
     private val inspector = AndroidAppInspector(appContext)
     private val riskEngine = RiskEngine()
     private val audit = JsonlAuditLogger(appContext)
@@ -42,6 +45,8 @@ class AndroidInstallGuard(
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
             if (action != Intent.ACTION_PACKAGE_ADDED && action != Intent.ACTION_PACKAGE_REPLACED) return
+            if (action == Intent.ACTION_PACKAGE_ADDED && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+
             val packageName = intent.data?.schemeSpecificPart ?: return
             if (packageName == appContext.packageName) return
 
@@ -98,21 +103,46 @@ class AndroidInstallGuard(
     }
 
     private fun reconcileAtProcessStart() {
-        val snapshots = inspector.collect()
+        val current = currentPackageVersions()
         val previous = baseline.readAll()
-        val current = snapshots.associateBy(AppSnapshot::packageName)
 
-        snapshots.forEach { snapshot ->
-            if (snapshot.packageName == appContext.packageName) return@forEach
-            val oldFingerprint = previous[snapshot.packageName]
-            val newFingerprint = snapshot.fingerprint()
-            if (oldFingerprint == null || oldFingerprint != newFingerprint) {
-                inspectSnapshot(snapshot, InstallObservationSource.PROCESS_START_RECONCILIATION)
+        if (previous.isEmpty()) {
+            baseline.replaceAll(current)
+            audit.append(
+                AuditEvent(
+                    timestampEpochMs = System.currentTimeMillis(),
+                    event = "INSTALL_GUARD_BASELINE_INITIALIZED",
+                    source = "install-guard",
+                    risk = RiskLevel.SAFE,
+                    evidence = listOf("packages=${current.size}"),
+                    action = "BASELINE",
+                    result = "INITIALIZED",
+                    verification = "Initial baseline stored without inventing historical install events",
+                ),
+            )
+            return
+        }
+
+        current.forEach { (packageName, fingerprint) ->
+            if (packageName == appContext.packageName) return@forEach
+            if (previous[packageName] != fingerprint) {
+                inspectOne(packageName, InstallObservationSource.PROCESS_START_RECONCILIATION)
             }
         }
 
-        baseline.replaceAll(current.mapValues { (_, snapshot) -> snapshot.fingerprint() })
+        baseline.replaceAll(current)
     }
+
+    private fun currentPackageVersions(): Map<String, String> = installedPackagesLightweight()
+        .associate { packageInfo -> packageInfo.packageName to packageInfo.lastUpdateTime.toString() }
+
+    private fun installedPackagesLightweight(): List<PackageInfo> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledPackages(PackageManager.PackageInfoFlags.of(0L))
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstalledPackages(0)
+        }
 
     private fun inspectOne(packageName: String, source: InstallObservationSource) {
         val snapshot = inspector.collectPackage(packageName)
@@ -164,17 +194,17 @@ class AndroidInstallGuard(
     }
 
     private fun refreshBaselineFor(packageName: String) {
-        val snapshot = inspector.collectPackage(packageName) ?: return
-        baseline.put(packageName, snapshot.fingerprint())
+        val packageInfo = runCatching { packageInfoLightweight(packageName) }.getOrNull() ?: return
+        baseline.put(packageName, packageInfo.lastUpdateTime.toString())
     }
 
-    private fun AppSnapshot.fingerprint(): String = buildString {
-        append(versionName.orEmpty())
-        append('|')
-        append(lastUpdateTimeEpochMs)
-        append('|')
-        append(certificateSha256.orEmpty())
-    }
+    private fun packageInfoLightweight(packageName: String): PackageInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0L))
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
 }
 
 private class InstallBaselineStore(context: Context) {
