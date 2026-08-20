@@ -22,7 +22,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":network-core"))
+    api(project(":network-core"))
     implementation(project(":core-security"))
     implementation(project(":audit-log"))
     implementation("androidx.core:core-ktx:1.17.0")
