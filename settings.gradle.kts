@@ -22,6 +22,7 @@ include(
     ":app-inspector",
     ":privacy-guard",
     ":malware-core",
+    ":file-scanner",
     ":audit-log",
     ":notifications",
 )
