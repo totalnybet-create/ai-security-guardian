@@ -4,9 +4,11 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import pl.siedlar.securityguardian.malware.MalwareAssessment
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.Properties
 
 enum class QuarantineOutcome {
     CONTAINED,
@@ -24,13 +26,20 @@ data class QuarantineRecord(
     val id: String,
     val originalUri: String,
     val originalDisplayName: String,
+    val source: String?,
     val sha256: String,
     val vaultFileName: String,
     val createdAtEpochMs: Long,
+    val riskScore: Int,
+    val riskLevel: String,
+    val recommendedDisposition: String,
+    val evidenceIds: List<String>,
     val originalRemovalRequested: Boolean,
     val originalRemoved: Boolean,
     val outcome: QuarantineOutcome,
     val detail: String,
+    val lastRestoreOutcome: RestoreOutcome? = null,
+    val lastRestoreAtEpochMs: Long? = null,
 )
 
 data class RestoreResult(
@@ -57,16 +66,37 @@ class AndroidFileQuarantine(
 
     fun quarantine(
         uri: Uri,
-        expectedSha256: String,
-        displayName: String,
+        assessment: MalwareAssessment,
         removeOriginalAfterVerifiedCopy: Boolean,
     ): QuarantineRecord {
-        val normalizedExpected = normalizeSha256(expectedSha256)
+        val normalizedExpected = normalizeSha256(assessment.artifact.sha256)
         val createdAt = now()
-        val extension = safeExtension(displayName)
+        val extension = safeExtension(assessment.artifact.displayName)
         val targetName = normalizedExpected + extension
         val target = File(vaultDir, targetName)
         val temp = File.createTempFile("quarantine-", ".tmp", vaultDir)
+
+        fun record(
+            outcome: QuarantineOutcome,
+            originalRemoved: Boolean,
+            detail: String,
+        ): QuarantineRecord = QuarantineRecord(
+            id = normalizedExpected,
+            originalUri = uri.toString(),
+            originalDisplayName = assessment.artifact.displayName,
+            source = assessment.artifact.source,
+            sha256 = normalizedExpected,
+            vaultFileName = targetName,
+            createdAtEpochMs = createdAt,
+            riskScore = assessment.riskScore,
+            riskLevel = assessment.riskLevel.name,
+            recommendedDisposition = assessment.recommendedDisposition.name,
+            evidenceIds = assessment.evidence.map { it.id },
+            originalRemovalRequested = removeOriginalAfterVerifiedCopy,
+            originalRemoved = originalRemoved,
+            outcome = outcome,
+            detail = detail,
+        ).also(::persistRecord)
 
         return try {
             val copiedHash = resolver.openInputStream(uri)?.use { input ->
@@ -77,16 +107,9 @@ class AndroidFileQuarantine(
 
             if (copiedHash != normalizedExpected) {
                 temp.delete()
-                return QuarantineRecord(
-                    id = normalizedExpected,
-                    originalUri = uri.toString(),
-                    originalDisplayName = displayName,
-                    sha256 = normalizedExpected,
-                    vaultFileName = targetName,
-                    createdAtEpochMs = createdAt,
-                    originalRemovalRequested = removeOriginalAfterVerifiedCopy,
-                    originalRemoved = false,
+                return record(
                     outcome = QuarantineOutcome.FAILED,
+                    originalRemoved = false,
                     detail = "Vault copy hash mismatch; original was not modified.",
                 )
             }
@@ -112,40 +135,24 @@ class AndroidFileQuarantine(
                 false
             }
 
-            val outcome = if (originalRemoved) {
-                QuarantineOutcome.CONTAINED
+            if (originalRemoved) {
+                record(
+                    outcome = QuarantineOutcome.CONTAINED,
+                    originalRemoved = true,
+                    detail = "Verified vault copy created and original document deleted.",
+                )
             } else {
-                QuarantineOutcome.VAULT_COPY_ONLY
+                record(
+                    outcome = QuarantineOutcome.VAULT_COPY_ONLY,
+                    originalRemoved = false,
+                    detail = "Verified vault copy created; original document remains accessible at its source.",
+                )
             }
-
-            QuarantineRecord(
-                id = normalizedExpected,
-                originalUri = uri.toString(),
-                originalDisplayName = displayName,
-                sha256 = normalizedExpected,
-                vaultFileName = targetName,
-                createdAtEpochMs = createdAt,
-                originalRemovalRequested = removeOriginalAfterVerifiedCopy,
-                originalRemoved = originalRemoved,
-                outcome = outcome,
-                detail = when (outcome) {
-                    QuarantineOutcome.CONTAINED -> "Verified vault copy created and original document deleted."
-                    QuarantineOutcome.VAULT_COPY_ONLY -> "Verified vault copy created; original document remains accessible at its source."
-                    QuarantineOutcome.FAILED -> error("unreachable")
-                },
-            )
         } catch (error: Throwable) {
             temp.delete()
-            QuarantineRecord(
-                id = normalizedExpected,
-                originalUri = uri.toString(),
-                originalDisplayName = displayName,
-                sha256 = normalizedExpected,
-                vaultFileName = targetName,
-                createdAtEpochMs = createdAt,
-                originalRemovalRequested = removeOriginalAfterVerifiedCopy,
-                originalRemoved = false,
+            record(
                 outcome = QuarantineOutcome.FAILED,
+                originalRemoved = false,
                 detail = error.message ?: error::class.java.simpleName,
             )
         }
@@ -159,23 +166,29 @@ class AndroidFileQuarantine(
         val expected = normalizeSha256(record.sha256)
         val source = File(vaultDir, record.vaultFileName)
         if (!source.isFile) {
-            return RestoreResult(
-                outcome = RestoreOutcome.FAILED,
-                sha256 = null,
-                vaultCopyRemoved = false,
-                detail = "Quarantine object no longer exists.",
+            return persistRestore(
+                record,
+                RestoreResult(
+                    outcome = RestoreOutcome.FAILED,
+                    sha256 = null,
+                    vaultCopyRemoved = false,
+                    detail = "Quarantine object no longer exists.",
+                ),
             )
         }
         if (hashFile(source) != expected) {
-            return RestoreResult(
-                outcome = RestoreOutcome.HASH_MISMATCH,
-                sha256 = null,
-                vaultCopyRemoved = false,
-                detail = "Quarantine object failed integrity verification before restore.",
+            return persistRestore(
+                record,
+                RestoreResult(
+                    outcome = RestoreOutcome.HASH_MISMATCH,
+                    sha256 = null,
+                    vaultCopyRemoved = false,
+                    detail = "Quarantine object failed integrity verification before restore.",
+                ),
             )
         }
 
-        return try {
+        val result = try {
             resolver.openOutputStream(destinationUri, "wt")?.use { output ->
                 FileInputStream(source).use { input -> input.copyTo(output) }
             } ?: error("ContentResolver returned no writable stream")
@@ -208,13 +221,87 @@ class AndroidFileQuarantine(
                 detail = error.message ?: error::class.java.simpleName,
             )
         }
+        return persistRestore(record, result)
     }
 
-    fun listRecords(): List<String> = vaultDir.listFiles()
+    fun listRecords(): List<QuarantineRecord> = vaultDir.listFiles()
         .orEmpty()
-        .filter(File::isFile)
-        .map(File::getName)
-        .sorted()
+        .filter { it.isFile && it.extension == "meta" }
+        .mapNotNull(::readRecord)
+        .sortedByDescending(QuarantineRecord::createdAtEpochMs)
+
+    private fun persistRestore(record: QuarantineRecord, result: RestoreResult): RestoreResult {
+        persistRecord(
+            record.copy(
+                lastRestoreOutcome = result.outcome,
+                lastRestoreAtEpochMs = now(),
+            ),
+        )
+        return result
+    }
+
+    private fun persistRecord(record: QuarantineRecord) {
+        val properties = Properties().apply {
+            setProperty("id", record.id)
+            setProperty("originalUri", record.originalUri)
+            setProperty("originalDisplayName", record.originalDisplayName)
+            setProperty("source", record.source.orEmpty())
+            setProperty("sha256", record.sha256)
+            setProperty("vaultFileName", record.vaultFileName)
+            setProperty("createdAtEpochMs", record.createdAtEpochMs.toString())
+            setProperty("riskScore", record.riskScore.toString())
+            setProperty("riskLevel", record.riskLevel)
+            setProperty("recommendedDisposition", record.recommendedDisposition)
+            setProperty("evidenceIds", record.evidenceIds.joinToString(EVIDENCE_SEPARATOR))
+            setProperty("originalRemovalRequested", record.originalRemovalRequested.toString())
+            setProperty("originalRemoved", record.originalRemoved.toString())
+            setProperty("outcome", record.outcome.name)
+            setProperty("detail", record.detail)
+            record.lastRestoreOutcome?.let { setProperty("lastRestoreOutcome", it.name) }
+            record.lastRestoreAtEpochMs?.let { setProperty("lastRestoreAtEpochMs", it.toString()) }
+        }
+        val target = metadataFile(record.id)
+        val temp = File.createTempFile("meta-", ".tmp", vaultDir)
+        temp.outputStream().buffered().use { output -> properties.store(output, null) }
+        if (target.exists() && !target.delete()) error("Cannot replace quarantine metadata")
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+    }
+
+    private fun readRecord(file: File): QuarantineRecord? = runCatching {
+        val properties = Properties().apply {
+            file.inputStream().buffered().use(::load)
+        }
+        QuarantineRecord(
+            id = properties.required("id"),
+            originalUri = properties.required("originalUri"),
+            originalDisplayName = properties.required("originalDisplayName"),
+            source = properties.getProperty("source").orEmpty().ifBlank { null },
+            sha256 = properties.required("sha256"),
+            vaultFileName = properties.required("vaultFileName"),
+            createdAtEpochMs = properties.required("createdAtEpochMs").toLong(),
+            riskScore = properties.required("riskScore").toInt(),
+            riskLevel = properties.required("riskLevel"),
+            recommendedDisposition = properties.required("recommendedDisposition"),
+            evidenceIds = properties.getProperty("evidenceIds").orEmpty()
+                .split(EVIDENCE_SEPARATOR)
+                .filter(String::isNotBlank),
+            originalRemovalRequested = properties.required("originalRemovalRequested").toBooleanStrict(),
+            originalRemoved = properties.required("originalRemoved").toBooleanStrict(),
+            outcome = QuarantineOutcome.valueOf(properties.required("outcome")),
+            detail = properties.required("detail"),
+            lastRestoreOutcome = properties.getProperty("lastRestoreOutcome")
+                ?.takeIf(String::isNotBlank)
+                ?.let(RestoreOutcome::valueOf),
+            lastRestoreAtEpochMs = properties.getProperty("lastRestoreAtEpochMs")
+                ?.takeIf(String::isNotBlank)
+                ?.toLong(),
+        )
+    }.getOrNull()
+
+    private fun metadataFile(id: String): File = File(vaultDir, "$id.meta")
 
     private fun supportsDelete(uri: Uri): Boolean {
         if (!DocumentsContract.isDocumentUri(appContext, uri)) return false
@@ -265,7 +352,7 @@ class AndroidFileQuarantine(
     private fun normalizeSha256(value: String): String {
         val normalized = value.trim().lowercase()
         require(normalized.length == 64 && normalized.all { it in '0'..'9' || it in 'a'..'f' }) {
-            "Expected SHA-256 must be 64 lowercase/uppercase hexadecimal characters"
+            "Expected SHA-256 must be 64 hexadecimal characters"
         }
         return normalized
     }
@@ -277,5 +364,12 @@ class AndroidFileQuarantine(
         return extension?.let { ".$it" } ?: ".bin"
     }
 
+    private fun Properties.required(key: String): String =
+        getProperty(key) ?: error("Missing quarantine metadata field: $key")
+
     private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
+
+    private companion object {
+        const val EVIDENCE_SEPARATOR = "\u001F"
+    }
 }
