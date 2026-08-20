@@ -12,7 +12,7 @@ class LocalSecurityIntentRouter {
     ): ProposedSecurityAction? {
         val raw = text.trim()
         if (raw.isBlank() || raw.length > MAX_INPUT_CHARS) return null
-        val lower = raw.lowercase(Locale("pl", "PL"))
+        val lower = raw.lowercase(Locale.forLanguageTag("pl-PL"))
 
         fun proposed(action: SecurityAction, arguments: Map<String, String> = emptyMap()): ProposedSecurityAction? =
             action.takeIf(allowedActions::contains)?.let { ProposedSecurityAction(it, arguments) }
