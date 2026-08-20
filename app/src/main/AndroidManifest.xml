@@ -12,6 +12,10 @@
         android:usesCleartextTraffic="false">
 
         <activity
+            android:name=".NetworkGuardActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".QuarantineActivity"
             android:exported="false" />
 
