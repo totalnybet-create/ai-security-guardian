@@ -56,8 +56,25 @@ Android implementation added but still awaiting Android SDK compiler/device veri
 - `ContentResolver`/SAF `content://` acquisition with nullable size metadata,
 - share-sheet `ACTION_SEND` entry point,
 - local-only file scan controller,
+- Android `PackageManager.getPackageArchiveInfo()` APK archive inspection using a bounded private temporary copy,
+- APK package/version/requested-permission/signing-certificate evidence,
+- declared Accessibility/overlay/install-packages/Notification Listener/VPN capability extraction from PackageManager-visible archive data,
 - light file-scan result screen,
-- real Android HIGH/CRITICAL malware notification sink.
+- real Android HIGH/CRITICAL malware notification sink,
+- `quarantine` Android module with verified private-vault copy, SHA-256 re-verification, `CONTAINED` / `VAULT_COPY_ONLY` / `FAILED` outcomes, restore verification, and persistent incident metadata,
+- explicit Human Gate before original-document deletion,
+- `install-guard` Android module with process-level package broadcasts and process-start reconciliation,
+- lightweight install baseline (`packageName + lastUpdateTime`) so unchanged packages are not fully rehashed on every process start,
+- duplicate update suppression for `PACKAGE_ADDED(EXTRA_REPLACING=true)` followed by `PACKAGE_REPLACED`,
+- process-wide audit-file write serialization across multiple logger instances.
+
+Static review performed after these additions:
+
+- no stale `expectedSha256` quarantine call sites remain in PR #3,
+- no `TODO` placeholders were found in the PR diff,
+- quarantine destructive removal is gated by explicit confirmation,
+- Android package-install monitoring does not use a false manifest receiver for package broadcasts restricted by Android 8+ background rules,
+- APK `BOOT_COMPLETED` receiver declaration is not claimed from `PackageManager` archive parsing because intent-filter actions are not exposed by that path.
 
 Important invariants:
 
@@ -65,11 +82,22 @@ Important invariants:
 - Bounded heuristic scanning is not described as full APK manifest analysis.
 - `DELETE` is never selected automatically by the current malware risk engine.
 - An unknown file size remains `null`; the implementation does not convert unknown to fake `0` bytes.
+- `CONTAINED` is emitted only after a hash-verified vault copy exists and the original document was actually deleted.
+- A verified vault copy without original deletion is `VAULT_COPY_ONLY`, never containment.
+- Standard Install Guard does not claim guaranteed instant 24/7 observation after Android has killed the Guardian process; reconciliation closes the evidence gap on next process start.
 
-Still pending:
+Build infrastructure status:
 
-- Android SDK/APK build verification for the Android file path,
-- APK binary manifest/resource parser integration,
-- concrete reputation provider integrations,
-- quarantine storage implementation,
-- full dashboard integration and real-device regression tests.
+- GitHub-hosted Actions remain unavailable because the account hosted-runner allowance is exhausted.
+- The local execution container has OpenJDK 21 and `kotlinc-jvm 1.9.0` but no Android SDK, Gradle distribution, Android dependency cache, or outbound DNS required to download them.
+- Google currently publishes a no-root Android CLI installer for Linux, but this execution environment cannot retrieve the required binary artifacts.
+- Therefore Android-only code in this checkpoint is **implemented and statically reviewed, not Android-SDK-build-verified**.
+
+Still pending before P2 can be called production-verified:
+
+- Android SDK/APK build verification for all Android modules,
+- emulator/device installation and regression tests,
+- full binary AndroidManifest intent-filter parsing if boot-receiver evidence is required,
+- concrete external reputation provider integrations or a signed local threat-intelligence feed,
+- restore UI flow using a user-selected writable destination,
+- full dashboard integration of malware/quarantine/install-guard state.
