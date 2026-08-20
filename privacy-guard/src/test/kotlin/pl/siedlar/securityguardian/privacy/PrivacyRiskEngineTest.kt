@@ -3,6 +3,8 @@ package pl.siedlar.securityguardian.privacy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import pl.siedlar.securityguardian.core.AuditEvent
+import pl.siedlar.securityguardian.core.AuditSink
 import pl.siedlar.securityguardian.core.RiskLevel
 
 class PrivacyRiskEngineTest {
@@ -10,9 +12,7 @@ class PrivacyRiskEngineTest {
 
     @Test
     fun ordinaryCameraPermissionDoesNotBecomeMalwareVerdict() {
-        val result = engine.assess(
-            snapshot(camera = true),
-        )
+        val result = engine.assess(snapshot(camera = true))
 
         assertEquals(3, result.riskScore)
         assertEquals(RiskLevel.SAFE, result.riskLevel)
@@ -20,7 +20,7 @@ class PrivacyRiskEngineTest {
     }
 
     @Test
-    fun accessibilityOverlayAndNotificationsBecomeHighOrCritical() {
+    fun accessibilityOverlayAndNotificationsBecomeCritical() {
         val result = engine.assess(
             snapshot(
                 accessibility = true,
@@ -46,6 +46,44 @@ class PrivacyRiskEngineTest {
         assertEquals(ObservationState.UNKNOWN, result.snapshot.microphoneActiveState)
         assertEquals(ObservationState.UNKNOWN, result.snapshot.cameraActiveState)
         assertTrue(result.evidence.none { it.id.contains("active_usage") })
+    }
+
+    @Test
+    fun privacyScanPublishesAlertAndAuditForCriticalAssessment() {
+        val risky = snapshot(
+            accessibility = true,
+            overlay = true,
+            notificationListenerEnabled = true,
+            microphone = true,
+            camera = true,
+        )
+        val audits = mutableListOf<AuditEvent>()
+        val alerts = mutableListOf<PrivacyAssessment>()
+
+        val service = PrivacyScanService(
+            inventory = object : PrivacyInventorySource {
+                override fun collect(): List<PrivacySnapshot> = listOf(risky)
+            },
+            riskEngine = engine,
+            auditSink = object : AuditSink {
+                override fun append(event: AuditEvent) {
+                    audits += event
+                }
+            },
+            alertSink = object : PrivacyAlertSink {
+                override fun publish(assessment: PrivacyAssessment) {
+                    alerts += assessment
+                }
+            },
+            now = { 1_000L },
+        )
+
+        val report = service.run()
+
+        assertTrue(report.highOrCriticalCount >= 1)
+        assertTrue(alerts.isNotEmpty())
+        assertTrue(audits.any { it.event == "PRIVACY_RISK_DETECTED" })
+        assertTrue(audits.any { it.event == "PRIVACY_SCAN_COMPLETED" })
     }
 
     private fun snapshot(
