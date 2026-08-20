@@ -27,6 +27,7 @@ include(
     ":install-guard",
     ":network-core",
     ":network-guard",
+    ":url-guard-core",
     ":audit-log",
     ":notifications",
 )
