@@ -12,8 +12,8 @@ android {
         applicationId = "pl.siedlar.securityguardian"
         minSdk = 23
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5.0-p4"
+        versionCode = 6
+        versionName = "0.5.1-p4-voice"
     }
 
     buildFeatures {
@@ -56,6 +56,7 @@ dependencies {
     implementation(project(":command-core"))
     implementation(project(":command-android"))
     implementation(project(":ai-copilot-core"))
+    implementation(project(":voice-android"))
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
