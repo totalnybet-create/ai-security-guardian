@@ -12,9 +12,11 @@ Containment is never inferred from the risk score alone.
 
 The vault stores persistent private metadata for the incident, including source URI/provider, display name, SHA-256, timestamp, risk score, risk level, recommended disposition, evidence IDs, whether original removal was requested, whether it actually succeeded, quarantine outcome, and restore history.
 
-Restore copies the quarantined object to a user-selected writable destination and verifies SHA-256 after writing. The vault object can be removed only after a successful hash-verified restore. A failed or mismatched restore retains the vault copy.
+Restore copies the quarantined object to a user-selected writable destination and verifies SHA-256 after writing. The current UI retains the vault object after a successful restore, avoiding implicit deletion of the recovery copy. A failed or mismatched restore always retains the vault copy.
 
 Deleting the original document is a destructive filesystem action and is behind an explicit Human Gate in the UI. Guardian first creates and verifies the vault copy and only then attempts `DocumentsContract.deleteDocument()` when the provider advertises `FLAG_SUPPORTS_DELETE`.
+
+The main dashboard links to a private `QuarantineActivity` that reloads persisted records after process restart and exposes user-driven restore.
 
 ## APK archive parsing
 
@@ -45,6 +47,7 @@ The Play/standard implementation therefore uses:
 3. The initial baseline is stored without inventing historical install events.
 4. Update duplication is avoided by ignoring `PACKAGE_ADDED` when `EXTRA_REPLACING=true` and analyzing `PACKAGE_REPLACED` once.
 5. HIGH/CRITICAL results produce the existing Android security alert and an audit event.
+6. `GuardianApplication` starts the monitor at application-process startup; no dead UI switch is used to imply protection.
 
 This implementation does **not** claim guaranteed instant 24/7 install interception when Android has killed the Guardian process. Stronger always-on behavior belongs to a separately justified foreground/enterprise/Device Owner path after policy and battery review.
 
