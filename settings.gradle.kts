@@ -23,6 +23,8 @@ include(
     ":privacy-guard",
     ":malware-core",
     ":file-scanner",
+    ":quarantine",
+    ":install-guard",
     ":audit-log",
     ":notifications",
 )
