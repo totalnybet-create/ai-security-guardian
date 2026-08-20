@@ -11,7 +11,6 @@ class JsonlAuditLogger(
     context: Context,
 ) : AuditSink {
     private val file = File(context.filesDir, "security-audit.jsonl")
-    private val lock = Any()
 
     override fun append(event: AuditEvent) {
         val json = JSONObject()
@@ -25,10 +24,14 @@ class JsonlAuditLogger(
             .put("verification", event.verification)
             .toString()
 
-        synchronized(lock) {
+        synchronized(PROCESS_FILE_LOCK) {
             file.appendText(json + "\n", Charsets.UTF_8)
         }
     }
 
     fun logFile(): File = file
+
+    private companion object {
+        val PROCESS_FILE_LOCK = Any()
+    }
 }
