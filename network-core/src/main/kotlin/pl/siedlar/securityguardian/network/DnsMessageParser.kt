@@ -16,6 +16,7 @@ data class DnsMessageMetadata(
     val recursionDesired: Boolean,
     val responseCode: Int,
     val questions: List<DnsQuestion>,
+    val wireQuestionSectionLength: Int,
 )
 
 class DnsMessageParser(
@@ -60,6 +61,7 @@ class DnsMessageParser(
             recursionDesired = flags and 0x0100 != 0,
             responseCode = flags and 0x000F,
             questions = questions,
+            wireQuestionSectionLength = cursor - offset,
         )
     }
 
