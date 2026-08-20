@@ -21,6 +21,7 @@ include(
     ":core-security",
     ":app-inspector",
     ":privacy-guard",
+    ":malware-core",
     ":audit-log",
     ":notifications",
 )
