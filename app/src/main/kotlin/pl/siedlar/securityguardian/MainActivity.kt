@@ -80,6 +80,9 @@ class MainActivity : ComponentActivity() {
                     onVault = {
                         startActivity(Intent(this, QuarantineActivity::class.java))
                     },
+                    onNetwork = {
+                        startActivity(Intent(this, NetworkGuardActivity::class.java))
+                    },
                 )
             }
         }
@@ -150,6 +153,7 @@ private fun GuardianScreen(
     state: ScanUiState,
     onScan: () -> Unit,
     onVault: () -> Unit,
+    onNetwork: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -169,7 +173,7 @@ private fun GuardianScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Zweryfikowany zakres P1: aplikacje i prywatność. P2 dodaje lokalne skanowanie plików, APK, Install Guard i sejf kwarantanny; Android build pozostaje osobną bramką weryfikacji.",
+                    text = "P0/P1: aplikacje i prywatność. P2: pliki, APK, Install Guard i sejf. P3 dodaje realny DNS Guard; pełny firewall TCP/UDP nadal pozostaje osobną bramką.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -191,6 +195,15 @@ private fun GuardianScreen(
                     } else {
                         Text("SKANUJ CAŁY TELEFON")
                     }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onNetwork,
+                ) {
+                    Text("SIEĆ · DNS GUARD")
                 }
             }
 
