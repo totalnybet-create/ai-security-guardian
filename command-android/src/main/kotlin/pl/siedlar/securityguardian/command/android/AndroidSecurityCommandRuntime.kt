@@ -26,6 +26,9 @@ import pl.siedlar.securityguardian.core.RiskLevel
 import pl.siedlar.securityguardian.inspector.AndroidAppInspector
 import pl.siedlar.securityguardian.inspector.AndroidPrivacyInspector
 import pl.siedlar.securityguardian.network.NetworkAction
+import pl.siedlar.securityguardian.network.NetworkFlow
+import pl.siedlar.securityguardian.network.NetworkPolicyEngine
+import pl.siedlar.securityguardian.network.NetworkProtocol
 import pl.siedlar.securityguardian.network.android.AndroidNetworkRuleStore
 import pl.siedlar.securityguardian.network.android.DnsGuardController
 import pl.siedlar.securityguardian.network.android.DnsGuardState
@@ -42,6 +45,7 @@ class AndroidSecurityCommandRuntime(
     private val auditLogger = JsonlAuditLogger(appContext)
     private val networkRules = AndroidNetworkRuleStore(appContext)
     private val dnsController = DnsGuardController(appContext)
+    private val networkPolicyEngine = NetworkPolicyEngine()
 
     val supportedActions: Set<SecurityAction> = setOf(
         SecurityAction.RUN_FULL_SCAN,
@@ -222,8 +226,7 @@ class AndroidSecurityCommandRuntime(
             ?: return ExecutionResult(false, "MISSING_DOMAIN", "Brak domeny")
         val duration = request.arguments["durationMinutes"]?.toIntOrNull() ?: 10
 
-        val normalizedBlocked = networkRules.listUserRules().firstOrNull { it.domainSuffix == domain }
-        if (normalizedBlocked != null) {
+        if (networkRules.isUserBlockedDomain(domain)) {
             return ExecutionResult(
                 false,
                 "PERMANENT_BLOCK_PRESENT",
@@ -232,14 +235,32 @@ class AndroidSecurityCommandRuntime(
         }
 
         val rule = networkRules.allowDomainTemporarily(domain, duration)
+        val effectiveDecision = networkPolicyEngine.decide(
+            flow = NetworkFlow(
+                appPackage = null,
+                destinationHost = rule.domainSuffix,
+                destinationIp = null,
+                destinationPort = 53,
+                protocol = NetworkProtocol.UDP,
+            ),
+            rules = networkRules.list(),
+            threatEvidence = emptyList(),
+            nowEpochMs = System.currentTimeMillis(),
+        )
+        val effective = effectiveDecision.action == NetworkAction.TEMPORARY_ALLOW
         return ExecutionResult(
             success = true,
-            resultCode = "TEMPORARY_ALLOW_STORED",
-            detail = "Tymczasowe zezwolenie zapisane na $duration min.",
+            resultCode = if (effective) "TEMPORARY_ALLOW_STORED_AND_EFFECTIVE" else "TEMPORARY_ALLOW_STORED_BUT_OVERRIDDEN",
+            detail = if (effective) {
+                "Tymczasowe zezwolenie zapisane na $duration min i jest aktualnie efektywną decyzją polityki."
+            } else {
+                "Tymczasowe zezwolenie zapisane, ale silniejsza reguła ${effectiveDecision.action} nadal obowiązuje."
+            },
             verificationData = mapOf(
                 "ruleId" to rule.id,
                 "domain" to rule.domainSuffix.orEmpty(),
                 "expiresAt" to rule.expiresAtEpochMs.toString(),
+                "effectiveAction" to effectiveDecision.action.name,
             ),
         )
     }
@@ -247,7 +268,9 @@ class AndroidSecurityCommandRuntime(
     private fun verifyScores(execution: ExecutionResult, requirePrivacy: Boolean): VerificationResult {
         val appScore = execution.verificationData["appScore"]?.toIntOrNull()
         val privacyScore = execution.verificationData["privacyScore"]?.toIntOrNull()
-        val valid = appScore in 0..100 && (!requirePrivacy || privacyScore in 0..100)
+        val appValid = appScore != null && appScore in 0..100
+        val privacyValid = privacyScore != null && privacyScore in 0..100
+        val valid = appValid && (!requirePrivacy || privacyValid)
         return VerificationResult(
             valid,
             if (valid) "Zweryfikowano raport i zakres skanu." else "Raport nie zawiera poprawnych wyników skanu.",
@@ -257,7 +280,7 @@ class AndroidSecurityCommandRuntime(
     private fun verifyPrivacy(execution: ExecutionResult): VerificationResult {
         val score = execution.verificationData["privacyScore"]?.toIntOrNull()
         val count = execution.verificationData["privacyCount"]?.toIntOrNull()
-        val valid = score in 0..100 && count != null && count >= 0
+        val valid = score != null && score in 0..100 && count != null && count >= 0
         return VerificationResult(valid, if (valid) "Raport prywatności zweryfikowany." else "Brak poprawnego raportu prywatności.")
     }
 
@@ -265,14 +288,14 @@ class AndroidSecurityCommandRuntime(
         val expected = request.arguments["packageName"]
         val actual = execution.verificationData["packageName"]
         val score = execution.verificationData["riskScore"]?.toIntOrNull()
-        val valid = expected != null && expected == actual && score in 0..100
+        val valid = expected != null && expected == actual && score != null && score in 0..100
         return VerificationResult(valid, if (valid) "Ocena dotyczy żądanego pakietu." else "Nie potwierdzono oceny żądanego pakietu.")
     }
 
     private fun verifyUrl(execution: ExecutionResult): VerificationResult {
         val score = execution.verificationData["riskScore"]?.toIntOrNull()
         val level = execution.verificationData["riskLevel"]
-        val valid = score in 0..100 && !level.isNullOrBlank()
+        val valid = score != null && score in 0..100 && !level.isNullOrBlank()
         return VerificationResult(valid, if (valid) "Lokalna ocena URL zawiera wynik i verdict." else "Nie potwierdzono kompletnej oceny URL.")
     }
 
@@ -293,9 +316,17 @@ class AndroidSecurityCommandRuntime(
     private fun verifyTemporaryAllow(execution: ExecutionResult): VerificationResult {
         val ruleId = execution.verificationData["ruleId"] ?: return VerificationResult(false, "Brak ruleId")
         val rule = networkRules.list().firstOrNull { it.id == ruleId }
-        val valid = rule?.action == NetworkAction.TEMPORARY_ALLOW &&
+        val storedAndLive = rule?.action == NetworkAction.TEMPORARY_ALLOW &&
             (rule.expiresAtEpochMs ?: 0L) > System.currentTimeMillis()
-        return VerificationResult(valid, if (valid) "Tymczasowe ALLOW jest aktywne i ma przyszłe expiry." else "Nie potwierdzono aktywnego tymczasowego ALLOW.")
+        val effectiveAction = execution.verificationData["effectiveAction"]
+        return VerificationResult(
+            storedAndLive,
+            when {
+                !storedAndLive -> "Nie potwierdzono aktywnego tymczasowego ALLOW."
+                effectiveAction == NetworkAction.TEMPORARY_ALLOW.name -> "Tymczasowe ALLOW jest zapisane, niewygasłe i efektywne."
+                else -> "Tymczasowe ALLOW jest zapisane i niewygasłe, ale silniejsza reguła $effectiveAction ma pierwszeństwo."
+            },
+        )
     }
 
     private fun cachedInventory(source: AppInventorySource): AppInventorySource = object : AppInventorySource {
