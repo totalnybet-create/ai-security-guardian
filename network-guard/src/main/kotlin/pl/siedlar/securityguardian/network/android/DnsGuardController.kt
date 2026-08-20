@@ -56,31 +56,39 @@ class DnsGuardController(
     fun status(): DnsGuardStatus = statusStore.read()
 }
 
-internal class DnsGuardStatusStore(context: Context) {
-    private val preferences = context.getSharedPreferences("dns-guard-status-v1", Context.MODE_PRIVATE)
-
+internal class DnsGuardStatusStore(
+    @Suppress("UNUSED_PARAMETER") context: Context,
+) {
     fun write(state: DnsGuardState, detail: String?) {
-        preferences.edit()
-            .putString(KEY_STATE, state.name)
-            .putString(KEY_DETAIL, detail)
-            .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
-            .apply()
+        val now = System.currentTimeMillis()
+        liveState = state
+        liveDetail = detail
+        liveUpdatedAt = now
     }
 
     fun read(): DnsGuardStatus {
-        val state = preferences.getString(KEY_STATE, null)
-            ?.let { runCatching { DnsGuardState.valueOf(it) }.getOrNull() }
-            ?: if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) DnsGuardState.UNSUPPORTED else DnsGuardState.STOPPED
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return DnsGuardStatus(
+                state = DnsGuardState.UNSUPPORTED,
+                detail = "DNS Guard requires Android 10 / API 29 or newer",
+                updatedAtEpochMs = System.currentTimeMillis(),
+            )
+        }
         return DnsGuardStatus(
-            state = state,
-            detail = preferences.getString(KEY_DETAIL, null),
-            updatedAtEpochMs = preferences.getLong(KEY_UPDATED_AT, 0L),
+            state = liveState,
+            detail = liveDetail,
+            updatedAtEpochMs = liveUpdatedAt,
         )
     }
 
     private companion object {
-        const val KEY_STATE = "state"
-        const val KEY_DETAIL = "detail"
-        const val KEY_UPDATED_AT = "updatedAt"
+        @Volatile
+        var liveState: DnsGuardState = DnsGuardState.STOPPED
+
+        @Volatile
+        var liveDetail: String? = null
+
+        @Volatile
+        var liveUpdatedAt: Long = 0L
     }
 }
