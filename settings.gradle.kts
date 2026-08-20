@@ -31,6 +31,8 @@ include(
     ":command-core",
     ":command-android",
     ":ai-copilot-core",
+    ":voice-core",
+    ":voice-android",
     ":audit-log",
     ":notifications",
 )
