@@ -1,5 +1,6 @@
 package pl.siedlar.securityguardian.network
 
+import java.net.IDN
 import java.util.Locale
 
 enum class NetworkAction {
@@ -165,13 +166,19 @@ class NetworkPolicyEngine(
         if (rule.destinationPort != null && rule.destinationPort != flow.destinationPort) return false
         if (rule.protocol != null && rule.protocol != flow.protocol) return false
 
-        val suffix = rule.domainSuffix?.normalizeHost()
-        if (suffix != null) {
+        val rawSuffix = rule.domainSuffix
+        if (rawSuffix != null) {
+            val suffix = rawSuffix.normalizeHost() ?: return false
             val host = flow.destinationHost?.normalizeHost() ?: return false
             if (host != suffix && !host.endsWith(".$suffix")) return false
         }
         return true
     }
 
-    private fun String.normalizeHost(): String = trim().trimEnd('.').lowercase(Locale.ROOT)
+    private fun String.normalizeHost(): String? = runCatching {
+        val trimmed = trim().trimEnd('.')
+        IDN.toASCII(trimmed, IDN.USE_STD3_ASCII_RULES)
+            .lowercase(Locale.ROOT)
+            .takeIf(String::isNotBlank)
+    }.getOrNull()
 }
