@@ -49,6 +49,8 @@ dependencies {
     implementation(project(":privacy-guard"))
     implementation(project(":malware-core"))
     implementation(project(":file-scanner"))
+    implementation(project(":quarantine"))
+    implementation(project(":install-guard"))
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
