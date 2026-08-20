@@ -157,6 +157,7 @@ class GuardianDnsVpnService : VpnService() {
             val parsed = packetParser.parse(packetBytes)
             if (
                 parsed.status != PacketParseStatus.PARSED ||
+                parsed.fragmented ||
                 parsed.protocol != NetworkProtocol.UDP ||
                 parsed.destinationPort != DNS_PORT ||
                 parsed.destinationIp != VIRTUAL_DNS_IPV4
@@ -166,7 +167,7 @@ class GuardianDnsVpnService : VpnService() {
                     source = parsed.destinationIp ?: "unknown",
                     risk = RiskLevel.LOW,
                     action = "DROP_OUTSIDE_DNS_ROUTE",
-                    result = parsed.status.name,
+                    result = if (parsed.fragmented) "FRAGMENTED" else parsed.status.name,
                     evidence = listOf(parsed.detail),
                     verification = "Packet was not described as successfully filtered DNS",
                 )
