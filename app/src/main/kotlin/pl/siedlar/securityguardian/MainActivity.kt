@@ -77,6 +77,9 @@ class MainActivity : ComponentActivity() {
                             runOnUiThread { scanState = nextState }
                         }.start()
                     },
+                    onCopilot = {
+                        startActivity(Intent(this, CopilotActivity::class.java))
+                    },
                     onVault = {
                         startActivity(Intent(this, QuarantineActivity::class.java))
                     },
@@ -152,6 +155,7 @@ private sealed interface ScanUiState {
 private fun GuardianScreen(
     state: ScanUiState,
     onScan: () -> Unit,
+    onCopilot: () -> Unit,
     onVault: () -> Unit,
     onNetwork: () -> Unit,
 ) {
@@ -173,7 +177,7 @@ private fun GuardianScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "P0/P1: aplikacje i prywatność. P2: pliki, APK, Install Guard i sejf. P3 dodaje realny DNS Guard; pełny firewall TCP/UDP nadal pozostaje osobną bramką.",
+                    text = "P0/P1: aplikacje i prywatność. P2: pliki, APK, Install Guard i sejf. P3: realny DNS Guard. P4 dodaje lokalnego Security Copilota z zamkniętym brokerem komend; chmurowy AI i głos nie są jeszcze aktywne.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -195,6 +199,15 @@ private fun GuardianScreen(
                     } else {
                         Text("SKANUJ CAŁY TELEFON")
                     }
+                }
+            }
+
+            item {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onCopilot,
+                ) {
+                    Text("AI SECURITY COPILOT")
                 }
             }
 

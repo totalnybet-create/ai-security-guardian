@@ -28,6 +28,11 @@ include(
     ":network-core",
     ":network-guard",
     ":url-guard-core",
+    ":command-core",
+    ":command-android",
+    ":ai-copilot-core",
+    ":voice-core",
+    ":voice-android",
     ":audit-log",
     ":notifications",
 )
