@@ -36,27 +36,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import pl.siedlar.securityguardian.audit.JsonlAuditLogger
 import pl.siedlar.securityguardian.core.AppAssessment
+import pl.siedlar.securityguardian.core.AppInventorySource
+import pl.siedlar.securityguardian.core.AppSnapshot
 import pl.siedlar.securityguardian.core.DeviceScanReport
 import pl.siedlar.securityguardian.core.FullScanService
 import pl.siedlar.securityguardian.core.RiskEngine
 import pl.siedlar.securityguardian.core.RiskLevel
 import pl.siedlar.securityguardian.inspector.AndroidAppInspector
+import pl.siedlar.securityguardian.inspector.AndroidPrivacyInspector
+import pl.siedlar.securityguardian.notifications.AndroidPrivacyAlertSink
 import pl.siedlar.securityguardian.notifications.AndroidSecurityAlertSink
+import pl.siedlar.securityguardian.privacy.PrivacyAssessment
+import pl.siedlar.securityguardian.privacy.PrivacyRiskEngine
+import pl.siedlar.securityguardian.privacy.PrivacyScanReport
+import pl.siedlar.securityguardian.privacy.PrivacyScanService
 
 class MainActivity : ComponentActivity() {
-    private lateinit var scanService: FullScanService
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         requestNotificationPermissionWhenNeeded()
-
-        scanService = FullScanService(
-            inventory = AndroidAppInspector(applicationContext),
-            riskEngine = RiskEngine(),
-            auditSink = JsonlAuditLogger(applicationContext),
-            alertSink = AndroidSecurityAlertSink(applicationContext),
-        )
 
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
@@ -67,8 +65,9 @@ class MainActivity : ComponentActivity() {
                     onScan = {
                         if (scanState is ScanUiState.Scanning) return@GuardianScreen
                         scanState = ScanUiState.Scanning
+
                         Thread {
-                            val nextState = runCatching { scanService.run() }
+                            val nextState = runCatching { runVerifiedScan() }
                                 .fold(
                                     onSuccess = { ScanUiState.Complete(it) },
                                     onFailure = { ScanUiState.Error(it.message ?: "Nieznany błąd skanowania") },
@@ -81,6 +80,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun runVerifiedScan(): VerifiedScanBundle {
+        val rawInventory = AndroidAppInspector(applicationContext)
+        val sharedInventory = object : AppInventorySource {
+            private var cache: List<AppSnapshot>? = null
+
+            override fun collect(): List<AppSnapshot> {
+                cache?.let { return it }
+                return rawInventory.collect().also { cache = it }
+            }
+        }
+
+        val audit = JsonlAuditLogger(applicationContext)
+
+        val appReport = FullScanService(
+            inventory = sharedInventory,
+            riskEngine = RiskEngine(),
+            auditSink = audit,
+            alertSink = AndroidSecurityAlertSink(applicationContext),
+        ).run()
+
+        val privacyReport = PrivacyScanService(
+            inventory = AndroidPrivacyInspector(applicationContext, sharedInventory),
+            riskEngine = PrivacyRiskEngine(),
+            auditSink = audit,
+            alertSink = AndroidPrivacyAlertSink(applicationContext),
+        ).run()
+
+        return VerifiedScanBundle(
+            appReport = appReport,
+            privacyReport = privacyReport,
+        )
+    }
+
     private fun requestNotificationPermissionWhenNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -90,10 +122,21 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class VerifiedScanBundle(
+    val appReport: DeviceScanReport,
+    val privacyReport: PrivacyScanReport,
+) {
+    val securityScoreP1: Int
+        get() = minOf(appReport.appSecurityScore, privacyReport.privacySecurityScore)
+
+    val highOrCriticalCount: Int
+        get() = appReport.highOrCriticalCount + privacyReport.highOrCriticalCount
+}
+
 private sealed interface ScanUiState {
     data object Idle : ScanUiState
     data object Scanning : ScanUiState
-    data class Complete(val report: DeviceScanReport) : ScanUiState
+    data class Complete(val report: VerifiedScanBundle) : ScanUiState
     data class Error(val message: String) : ScanUiState
 }
 
@@ -120,15 +163,13 @@ private fun GuardianScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "P0: aplikacje, źródła instalacji, certyfikaty, hash APK, uprawnienia, Accessibility i Device Admin.",
+                    text = "Zweryfikowany zakres P1: aplikacje i prywatność. Pozostałe warstwy są dodawane etapami.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            item {
-                StatusCard(state)
-            }
+            item { StatusCard(state) }
 
             item {
                 Button(
@@ -148,25 +189,46 @@ private fun GuardianScreen(
             }
 
             if (state is ScanUiState.Complete) {
-                val riskyApps = state.report.assessments.filter { it.riskScore > 0 }.take(12)
+                val appRisks = state.report.appReport.assessments.filter { it.riskScore > 0 }.take(10)
+                val privacyRisks = state.report.privacyReport.assessments.filter { it.riskScore > 0 }.take(10)
+
                 item {
                     Text(
-                        "Najwyższe wykryte ryzyko",
+                        "Prywatność",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-
-                if (riskyApps.isEmpty()) {
+                if (privacyRisks.isEmpty()) {
                     item {
                         Text(
-                            "W zakresie P0 nie znaleziono aplikacji z podwyższonym wynikiem ryzyka. To nie jest jeszcze dowód czystości całego urządzenia.",
+                            "W dostępnym zakresie P1 nie wykryto podwyższonego ryzyka prywatności.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                 } else {
-                    items(riskyApps, key = { it.app.packageName }) { assessment ->
-                        RiskCard(assessment)
+                    items(privacyRisks, key = { "privacy:${it.snapshot.packageName}" }) { assessment ->
+                        PrivacyRiskCard(assessment)
+                    }
+                }
+
+                item {
+                    Text(
+                        "Aplikacje",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (appRisks.isEmpty()) {
+                    item {
+                        Text(
+                            "W dostępnym zakresie P0 nie wykryto aplikacji z podwyższonym wynikiem ryzyka.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                } else {
+                    items(appRisks, key = { "app:${it.app.packageName}" }) { assessment ->
+                        AppRiskCard(assessment)
                     }
                 }
             }
@@ -187,12 +249,12 @@ private fun StatusCard(state: ScanUiState) {
             when (state) {
                 ScanUiState.Idle -> {
                     Text("Brak zweryfikowanego skanu", fontWeight = FontWeight.Bold)
-                    Text("Uruchom skan, aby zbudować pierwszy rzeczywisty baseline bezpieczeństwa aplikacji.")
+                    Text("Uruchom skan, aby odczytać aktualny stan aplikacji i prywatności.")
                 }
 
                 ScanUiState.Scanning -> {
                     Text("Skanowanie w toku", fontWeight = FontWeight.Bold)
-                    Text("Analizuję rzeczywiste pakiety i ich dostępne sygnały bezpieczeństwa. UI pozostaje aktywne.")
+                    Text("Czytam jeden wspólny snapshot aplikacji, następnie analizuję bezpieczeństwo i prywatność. UI pozostaje aktywne.")
                 }
 
                 is ScanUiState.Error -> {
@@ -202,9 +264,9 @@ private fun StatusCard(state: ScanUiState) {
 
                 is ScanUiState.Complete -> {
                     val report = state.report
-                    Text("App Security Score", style = MaterialTheme.typography.labelLarge)
+                    Text("SECURITY SCORE P1 · zakres 2/7", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "${report.appSecurityScore}/100",
+                        "${report.securityScoreP1}/100",
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Bold,
                     )
@@ -212,11 +274,20 @@ private fun StatusCard(state: ScanUiState) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("Aplikacje: ${report.assessments.size}")
-                        Text("HIGH/CRITICAL: ${report.highOrCriticalCount}")
+                        Text("Aplikacje: ${report.appReport.appSecurityScore}/100")
+                        Text("Prywatność: ${report.privacyReport.privacySecurityScore}/100")
                     }
                     Text(
-                        "Score P0 = 100 minus najwyższy realny wynik ryzyka aplikacji. Pełny Security Score urządzenia powstanie po wdrożeniu prywatności, sieci i integralności.",
+                        if (report.highOrCriticalCount == 0) {
+                            "Brak HIGH/CRITICAL w aktualnie zweryfikowanych warstwach. To nie jest jeszcze dowód czystości całego urządzenia."
+                        } else {
+                            "Wykryto ${report.highOrCriticalCount} wyników HIGH/CRITICAL w zweryfikowanych warstwach. Sprawdź szczegóły poniżej."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Wynik P1 jest równy słabszej z dwóch kategorii, aby wysoki problem prywatności nie został ukryty przez dobry wynik aplikacji.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -227,8 +298,39 @@ private fun StatusCard(state: ScanUiState) {
 }
 
 @Composable
-private fun RiskCard(assessment: AppAssessment) {
-    val accent = when (assessment.riskLevel) {
+private fun PrivacyRiskCard(assessment: PrivacyAssessment) {
+    RiskContainer(
+        label = assessment.snapshot.label,
+        packageName = assessment.snapshot.packageName,
+        riskLevel = assessment.riskLevel,
+        riskScore = assessment.riskScore,
+        confidence = assessment.confidence,
+        evidence = assessment.evidence.take(3).map { "${it.title}: ${it.detail}" },
+    )
+}
+
+@Composable
+private fun AppRiskCard(assessment: AppAssessment) {
+    RiskContainer(
+        label = assessment.app.label,
+        packageName = assessment.app.packageName,
+        riskLevel = assessment.riskLevel,
+        riskScore = assessment.riskScore,
+        confidence = assessment.confidence,
+        evidence = assessment.evidence.take(3).map { "${it.title}: ${it.detail}" },
+    )
+}
+
+@Composable
+private fun RiskContainer(
+    label: String,
+    packageName: String,
+    riskLevel: RiskLevel,
+    riskScore: Int,
+    confidence: Int,
+    evidence: List<String>,
+) {
+    val accent = when (riskLevel) {
         RiskLevel.CRITICAL -> Color(0xFFB3261E)
         RiskLevel.HIGH -> Color(0xFF9A4A00)
         RiskLevel.MEDIUM -> Color(0xFF7A5C00)
@@ -250,26 +352,26 @@ private fun RiskCard(assessment: AppAssessment) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(assessment.app.label, fontWeight = FontWeight.SemiBold)
+                    Text(label, fontWeight = FontWeight.SemiBold)
                     Text(
-                        assessment.app.packageName,
+                        packageName,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Text(
-                    "${assessment.riskLevel.name} ${assessment.riskScore}/100",
+                    "${riskLevel.name} $riskScore/100",
                     color = accent,
                     fontWeight = FontWeight.Bold,
                 )
             }
 
-            assessment.evidence.take(3).forEach { evidence ->
-                Text("• ${evidence.title}: ${evidence.detail}", style = MaterialTheme.typography.bodySmall)
+            evidence.forEach { detail ->
+                Text("• $detail", style = MaterialTheme.typography.bodySmall)
             }
 
             Text(
-                "Pewność oceny: ${assessment.confidence}%",
+                "Pewność oceny: $confidence%",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
