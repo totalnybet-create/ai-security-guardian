@@ -8,31 +8,42 @@ Environment:
 - OpenJDK 21
 - pure Kotlin privacy engine compiled without Android SDK dependencies
 
-Verification artifact SHA-256:
+Verification artifacts:
 
-`c126306f7c740b08a866027d685647295b2e25a57028863ff61c929e78cb6ca9`
+- Privacy engine tests SHA-256: `c126306f7c740b08a866027d685647295b2e25a57028863ff61c929e78cb6ca9`
+- Privacy scan pipeline tests SHA-256: `7d5e9d90d807743f5c42c3abc6a805c3911feabb6004b1cb6359cdba347575a1`
 
-Observed output:
+Observed outputs:
 
 `P1_PRIVACY_TESTS_OK camera=3 risky=100 confidence=96 micState=UNKNOWN`
+
+`P1_PIPELINE_TESTS_OK risk=100 privacyScore=0 audits=2 alerts=1`
 
 Verified scenarios:
 
 1. Camera permission alone -> risk score `3`, verdict remains `SAFE`; P1 does not label ordinary permissions as malware.
 2. Active Accessibility + overlay capability + enabled Notification Listener + microphone + camera -> risk score `100`, verdict `CRITICAL`, with correlation evidence.
 3. When Android does not provide evidence that microphone/camera are actively in use, state remains `UNKNOWN`; the engine does not manufacture an `ACTIVE` observation.
+4. A critical privacy assessment emits a `PRIVACY_RISK_DETECTED` audit event, invokes the privacy alert contract, and completes with a `PRIVACY_SCAN_COMPLETED` audit event.
 
 Verified scope:
 
 - privacy data model and observation-state semantics,
-- deterministic PrivacyRiskEngine scoring,
+- deterministic `PrivacyRiskEngine` scoring,
 - correlation rules,
 - false-positive guard for ordinary camera permission,
-- no hallucinated active microphone/camera state.
+- no hallucinated active microphone/camera state,
+- `PrivacyScanService` orchestration,
+- audit and alert invocation contracts.
+
+Android API review confirmed the selected public APIs exist for the intended observations:
+
+- `NotificationManagerCompat.getEnabledListenerPackages(context)` for enabled notification-listener packages,
+- `PowerManager.isIgnoringBatteryOptimizations(packageName)` for power allowlist state.
 
 Still pending Android SDK build verification:
 
 - `AndroidPrivacyInspector`,
-- `NotificationManagerCompat.getEnabledListenerPackages()` integration,
-- `PowerManager.isIgnoringBatteryOptimizations(packageName)` integration,
-- final app wiring/UI.
+- Android notification implementation for privacy alerts,
+- final app wiring/UI,
+- APK assembly.
