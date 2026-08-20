@@ -8,6 +8,7 @@ enum class SpeechInputMode {
 
 enum class SpeechOutputMode {
     ON_DEVICE,
+    SYSTEM_SERVICE,
     SYSTEM_NETWORK,
     UNAVAILABLE,
 }
