@@ -3,6 +3,7 @@ package pl.siedlar.securityguardian
 import android.content.Context
 import android.net.Uri
 import pl.siedlar.securityguardian.audit.JsonlAuditLogger
+import pl.siedlar.securityguardian.files.AndroidApkArchiveInspector
 import pl.siedlar.securityguardian.files.AndroidUriArtifactFactory
 import pl.siedlar.securityguardian.files.AndroidUriMalwareScanner
 import pl.siedlar.securityguardian.malware.CompositeReputationEngine
@@ -25,6 +26,7 @@ class FileScanController(
             auditSink = JsonlAuditLogger(appContext),
             alertSink = AndroidMalwareAlertSink(appContext),
         ),
+        apkArchiveInspector = AndroidApkArchiveInspector(appContext),
     )
 
     fun scan(uri: Uri): MalwareAssessment = scanner.scan(
