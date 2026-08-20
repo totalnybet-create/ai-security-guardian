@@ -38,14 +38,19 @@ class AndroidAppInspector(
             .sortedBy { it.label.lowercase() }
     }
 
-    private fun installedPackages(): List<PackageInfo> {
-        val flags = (
-            PackageManager.GET_PERMISSIONS or
-                PackageManager.GET_SERVICES or
-                PackageManager.GET_SIGNATURES or
-                PackageManager.GET_SIGNING_CERTIFICATES
-            ).toLong()
+    fun collectPackage(packageName: String): AppSnapshot? {
+        val packageInfo = runCatching { installedPackage(packageName) }.getOrNull() ?: return null
+        return runCatching {
+            toSnapshot(
+                packageInfo = packageInfo,
+                enabledAccessibilityPackages = enabledAccessibilityPackages(),
+                activeDeviceAdmins = activeDeviceAdminPackages(),
+            )
+        }.getOrNull()
+    }
 
+    private fun installedPackages(): List<PackageInfo> {
+        val flags = packageInfoFlags()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getInstalledPackages(PackageManager.PackageInfoFlags.of(flags))
         } else {
@@ -53,6 +58,26 @@ class AndroidAppInspector(
             packageManager.getInstalledPackages(flags.toInt())
         }
     }
+
+    private fun installedPackage(packageName: String): PackageInfo {
+        val flags = packageInfoFlags()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(
+                packageName,
+                PackageManager.PackageInfoFlags.of(flags),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, flags.toInt())
+        }
+    }
+
+    private fun packageInfoFlags(): Long = (
+        PackageManager.GET_PERMISSIONS or
+            PackageManager.GET_SERVICES or
+            PackageManager.GET_SIGNATURES or
+            PackageManager.GET_SIGNING_CERTIFICATES
+        ).toLong()
 
     private fun toSnapshot(
         packageInfo: PackageInfo,
