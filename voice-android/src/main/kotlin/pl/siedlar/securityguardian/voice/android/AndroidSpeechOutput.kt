@@ -61,7 +61,11 @@ class AndroidSpeechOutput(
     fun speak(reply: SpokenReply): Boolean {
         val engine = tts ?: return false
         if (!ready) return false
-        if (outputMode == SpeechOutputMode.SYSTEM_NETWORK && !allowNetworkFallback) return false
+        if (!allowNetworkFallback &&
+            (outputMode == SpeechOutputMode.SYSTEM_NETWORK || outputMode == SpeechOutputMode.SYSTEM_SERVICE)
+        ) {
+            return false
+        }
 
         val utteranceId = "guardian-${UUID.randomUUID()}"
         val params = Bundle().apply {
@@ -100,9 +104,9 @@ class AndroidSpeechOutput(
             .sortedWith(
                 compareByDescending<Voice> { it.locale.country.equals(locale.country, ignoreCase = true) }
                     .thenByDescending { !it.isNetworkConnectionRequired }
-                    .thenByDescending(Voice::getQuality)
-                    .thenBy(Voice::getLatency)
-                    .thenBy(Voice::getName),
+                    .thenByDescending { it.quality }
+                    .thenBy { it.latency }
+                    .thenBy { it.name },
             )
             .toList()
 
