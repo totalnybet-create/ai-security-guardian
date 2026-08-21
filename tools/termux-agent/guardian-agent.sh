@@ -9,10 +9,23 @@ GRADLE="$HOME/.local/opt/gradle-8.13/bin/gradle"
 STATE="$HOME/.local/state/guardian-agent"
 LOGDIR="$STATE/logs"
 POLL_SECONDS="${GUARDIAN_AGENT_POLL_SECONDS:-30}"
+
+# AGP 8.13 works on JDK 17. On Android/Termux we pin JDK 17 because
+# newer Android/JDK combinations can abort while Gradle initializes native services.
+JAVA17="$PREFIX/lib/jvm/java-17-openjdk"
+if [ -x "$JAVA17/bin/java" ]; then
+  export JAVA_HOME="$JAVA17"
+  export PATH="$JAVA_HOME/bin:$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
+else
+  export PATH="$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
+fi
+
 export ANDROID_HOME="$HOME/android-sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export GH_PAGER=cat
-export PATH="$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
+# Disable Gradle native integration/VFS watching on Android. This avoids JNI/native-platform
+# initialization paths that are not host-Linux compatible on some Android 16 builds.
+export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false"
 
 mkdir -p "$LOGDIR"
 
@@ -26,15 +39,21 @@ gradle_guardian() {
     --no-daemon \
     --stacktrace \
     --max-workers=2 \
-    -Dorg.gradle.jvmargs='-Xmx1536m -Dfile.encoding=UTF-8' \
+    -Dorg.gradle.native=false \
+    -Dorg.gradle.vfs.watch=false \
+    -Dorg.gradle.jvmargs='-Xmx1536m -Dfile.encoding=UTF-8 -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false' \
     -Pandroid.aapt2FromMavenOverride="$PREFIX/bin/aapt2" \
     "$@"
 }
 
+repo_dirty_nonlocal() {
+  git status --porcelain --untracked-files=all | grep -vE '^\?\? local\.properties$|^ M local\.properties$' || true
+}
+
 action_sync() {
   cd "$PROJECT" || return 1
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "Repo ma lokalne zmiany; sync przerwany, żeby niczego nie nadpisać."
+  if [ -n "$(repo_dirty_nonlocal)" ]; then
+    echo "Repo ma lokalne zmiany inne niż local.properties; sync przerwany."
     return 2
   fi
   git fetch origin "$BRANCH"
@@ -50,12 +69,13 @@ action_status() {
   echo "branch=$BRANCH"
   echo "project=$PROJECT"
   echo "android_home=$ANDROID_HOME"
+  echo "java_home=${JAVA_HOME:-system}"
   echo "java=$(java -version 2>&1 | head -n1)"
   echo "gradle=$($GRADLE --version 2>/dev/null | awk '/Gradle /{print $2; exit}')"
   echo "aapt2=$(aapt2 version 2>&1 | head -n1)"
   if [ -d "$PROJECT/.git" ]; then
     echo "commit=$(git -C "$PROJECT" rev-parse --short HEAD 2>/dev/null || true)"
-    echo "dirty=$(test -n "$(git -C "$PROJECT" status --porcelain 2>/dev/null)" && echo yes || echo no)"
+    echo "dirty_nonlocal=$(test -n "$(cd "$PROJECT" && repo_dirty_nonlocal)" && echo yes || echo no)"
   fi
   df -h "$HOME" | tail -n1
 }
@@ -153,7 +173,7 @@ process_issue() {
 }
 
 main_loop() {
-  log "agent-start poll=${POLL_SECONDS}s"
+  log "agent-start poll=${POLL_SECONDS}s java_home=${JAVA_HOME:-system}"
   while true; do
     if ! gh auth status -h github.com >/dev/null 2>&1; then
       log "github-auth-missing"
