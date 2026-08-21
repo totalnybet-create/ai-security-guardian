@@ -1,0 +1,17 @@
+name: Runner Smoke
+
+on:
+  push:
+    branches:
+      - 'work/**'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Runner alive
+        run: echo RUNNER_OK
