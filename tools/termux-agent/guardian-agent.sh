@@ -5,13 +5,12 @@ REPO="totalnybet-create/ai-security-guardian"
 OWNER="totalnybet-create"
 PROJECT="$HOME/ai-security-guardian"
 BRANCH="work/termux-agent"
+AGENT_HOME="$HOME/.local/share/guardian-agent"
 GRADLE="$HOME/.local/opt/gradle-8.13/bin/gradle"
 STATE="$HOME/.local/state/guardian-agent"
 LOGDIR="$STATE/logs"
 POLL_SECONDS="${GUARDIAN_AGENT_POLL_SECONDS:-30}"
 
-# AGP 8.13 works on JDK 17. On Android/Termux we pin JDK 17 because
-# newer Android/JDK combinations can abort while Gradle initializes native services.
 JAVA17="$PREFIX/lib/jvm/java-17-openjdk"
 if [ -x "$JAVA17/bin/java" ]; then
   export JAVA_HOME="$JAVA17"
@@ -23,8 +22,6 @@ fi
 export ANDROID_HOME="$HOME/android-sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export GH_PAGER=cat
-# Disable Gradle native integration/VFS watching on Android. This avoids JNI/native-platform
-# initialization paths that are not host-Linux compatible on some Android 16 builds.
 export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false"
 
 mkdir -p "$LOGDIR"
@@ -62,6 +59,13 @@ action_sync() {
   git rev-parse --short HEAD
 }
 
+action_agent_update() {
+  action_sync || return $?
+  cp "$PROJECT/tools/termux-agent/guardian-agent.sh" "$AGENT_HOME/guardian-agent.sh"
+  chmod 700 "$AGENT_HOME/guardian-agent.sh"
+  echo "agent_updated=$(git -C "$PROJECT" rev-parse --short HEAD)"
+}
+
 action_status() {
   echo "guardian-agent=ok"
   echo "time=$(date -Iseconds)"
@@ -82,45 +86,22 @@ action_status() {
 
 run_action() {
   case "$1" in
-    ping)
-      echo "PONG $(date -Iseconds)"
-      ;;
-    status)
-      action_status
-      ;;
-    sync)
-      action_sync
-      ;;
-    test)
-      gradle_guardian :core-security:test
-      ;;
-    build)
-      gradle_guardian :app:assembleDebug
-      ;;
-    build_test)
-      gradle_guardian :core-security:test :app:assembleDebug
-      ;;
-    build_open)
-      gradle_guardian :app:assembleDebug && termux-open "$PROJECT/app/build/outputs/apk/debug/app-debug.apk"
-      ;;
-    launch)
-      am start -n pl.siedlar.securityguardian/.MainActivity
-      ;;
-    lock)
-      am start -n pl.siedlar.securityguardian/.LockNowActivity
-      ;;
-    *)
-      echo "Odrzucono niedozwoloną akcję: $1"
-      return 64
-      ;;
+    ping) echo "PONG $(date -Iseconds)" ;;
+    status) action_status ;;
+    sync) action_sync ;;
+    agent_update) action_agent_update ;;
+    test) gradle_guardian :core-security:test ;;
+    build) gradle_guardian :app:assembleDebug ;;
+    build_test) gradle_guardian :core-security:test :app:assembleDebug ;;
+    build_open) gradle_guardian :app:assembleDebug && termux-open "$PROJECT/app/build/outputs/apk/debug/app-debug.apk" ;;
+    launch) am start -n pl.siedlar.securityguardian/.MainActivity ;;
+    lock) am start -n pl.siedlar.securityguardian/.LockNowActivity ;;
+    *) echo "Odrzucono niedozwoloną akcję: $1"; return 64 ;;
   esac
 }
 
 process_issue() {
-  local number="$1"
-  local title="$2"
-  local author="$3"
-  local body_b64="$4"
+  local number="$1" title="$2" author="$3" body_b64="$4"
   local body action started logfile rc excerpt comment reject_body start_body
 
   [ "$author" = "$OWNER" ] || { log "skip #$number author=$author"; return 0; }
@@ -130,7 +111,7 @@ process_issue() {
   [ -n "$action" ] || { log "skip #$number missing-action"; return 0; }
 
   case "$action" in
-    ping|status|sync|test|build|build_test|build_open|launch|lock) ;;
+    ping|status|sync|agent_update|test|build|build_test|build_open|launch|lock) ;;
     *)
       reject_body="$(printf 'GUARDIAN_AGENT_RESULT\nstatus=REJECTED\naction=%s\nreason=action_not_allowed\n' "$action")"
       gh issue comment "$number" --repo "$REPO" --body "$reject_body" >/dev/null 2>&1 || true
@@ -142,15 +123,10 @@ process_issue() {
   started="$(date -Iseconds)"
   logfile="$LOGDIR/issue-${number}-${action}-$(date +%Y%m%d-%H%M%S).log"
   log "start #$number action=$action title=$title"
-
   start_body="$(printf 'GUARDIAN_AGENT_STARTED\naction=%s\ntime=%s\n' "$action" "$started")"
   gh issue comment "$number" --repo "$REPO" --body "$start_body" >/dev/null 2>&1 || true
 
-  if run_action "$action" >"$logfile" 2>&1; then
-    rc=0
-  else
-    rc=$?
-  fi
+  if run_action "$action" >"$logfile" 2>&1; then rc=0; else rc=$?; fi
 
   excerpt="$(tail -c 12000 "$logfile" 2>/dev/null || true)"
   comment="$STATE/comment-$number.txt"
@@ -170,6 +146,11 @@ process_issue() {
   gh issue close "$number" --repo "$REPO" >/dev/null 2>&1 || true
   rm -f "$comment"
   log "finish #$number action=$action rc=$rc"
+
+  if [ "$action" = "agent_update" ] && [ "$rc" -eq 0 ]; then
+    log "self-reexec"
+    exec "$AGENT_HOME/guardian-agent.sh"
+  fi
 }
 
 main_loop() {
@@ -185,15 +166,10 @@ main_loop() {
       [ -n "${number:-}" ] || continue
       process_issue "$number" "$title" "$author" "$body_b64"
     done < <(
-      gh issue list \
-        --repo "$REPO" \
-        --state open \
-        --limit 30 \
-        --json number,title,body,author \
+      gh issue list --repo "$REPO" --state open --limit 30 --json number,title,body,author \
         --jq '.[] | select(.title | startswith("[TERMUX]")) | [.number,.title,.author.login,(.body|@base64)] | @tsv' \
         2>>"$STATE/agent.log" || true
     )
-
     sleep "$POLL_SECONDS"
   done
 }
