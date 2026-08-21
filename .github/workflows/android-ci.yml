@@ -1,6 +1,7 @@
 name: Android CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -9,6 +10,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
@@ -95,6 +100,7 @@ jobs:
         with:
           name: guardian-ci-diagnostics
           if-no-files-found: error
+          retention-days: 14
           path: |
             ci-diagnostics/**
             **/build/reports/**
@@ -104,5 +110,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ai-security-guardian-debug-apk
+          retention-days: 14
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
