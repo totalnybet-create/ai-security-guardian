@@ -20,7 +20,7 @@ fail() { printf '\nBŁĄD: %s\n' "$1" >&2; exit 1; }
 
 say "Pakiety Termux"
 pkg update -y
-pkg install -y git gh jq curl unzip coreutils openjdk-21 aapt2 apksigner zipalign d8 termux-services
+pkg install -y git gh jq curl unzip coreutils openjdk-21 aapt2 apksigner d8 termux-services
 
 mkdir -p "$AGENT_HOME" "$STATE/logs" "$HOME/.cache/guardian-agent" "$HOME/.local/opt" "$SDK/platforms" "$SDK/build-tools"
 
@@ -79,9 +79,11 @@ for v in 35.0.0 36.0.0; do
   dir="$SDK/build-tools/$v"
   mkdir -p "$dir"
   ln -sf "$PREFIX/bin/aapt2" "$dir/aapt2"
-  ln -sf "$PREFIX/bin/zipalign" "$dir/zipalign"
   ln -sf "$PREFIX/bin/apksigner" "$dir/apksigner"
   ln -sf "$PREFIX/bin/d8" "$dir/d8"
+  if command -v zipalign >/dev/null 2>&1; then
+    ln -sf "$(command -v zipalign)" "$dir/zipalign"
+  fi
   cat > "$dir/source.properties" <<PROP
 Pkg.Desc=Android SDK Build-Tools $v (Termux bridge)
 Pkg.Revision=$v
