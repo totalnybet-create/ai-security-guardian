@@ -19,44 +19,84 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Initialize diagnostics
+        shell: bash
+        run: |
+          mkdir -p ci-diagnostics
+          {
+            echo "stage=checkout_ok"
+            date -u
+            uname -a
+            echo "ANDROID_HOME=${ANDROID_HOME:-}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          } > ci-diagnostics/stages.log
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      - name: Record Java setup
+        if: always()
+        shell: bash
+        run: |
+          echo "stage=java_setup_reached" >> ci-diagnostics/stages.log
+          java -version >> ci-diagnostics/java.log 2>&1 || true
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Record Android setup
+        if: always()
+        shell: bash
+        run: |
+          echo "stage=android_setup_reached" >> ci-diagnostics/stages.log
+          command -v sdkmanager >> ci-diagnostics/android.log 2>&1 || true
+          sdkmanager --version >> ci-diagnostics/android.log 2>&1 || true
+
       - name: Install Android 16 SDK
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        shell: bash
+        run: |
+          set -o pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" 2>&1 | tee ci-diagnostics/sdk-install.log
+          echo "stage=android36_installed" >> ci-diagnostics/stages.log
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
+      - name: Record Gradle setup
+        if: always()
+        shell: bash
+        run: |
+          echo "stage=gradle_setup_reached" >> ci-diagnostics/stages.log
+          gradle -v >> ci-diagnostics/gradle.log 2>&1 || true
+
       - name: Unit tests
         shell: bash
         run: |
           set -o pipefail
-          gradle :core-security:test --stacktrace --no-daemon 2>&1 | tee core-security-test.log
+          gradle :core-security:test --stacktrace --no-daemon 2>&1 | tee ci-diagnostics/core-security-test.log
+          echo "stage=unit_tests_ok" >> ci-diagnostics/stages.log
 
       - name: Build debug APK
         shell: bash
         run: |
           set -o pipefail
-          gradle :app:assembleDebug --stacktrace --no-daemon 2>&1 | tee apk-build.log
+          gradle :app:assembleDebug --stacktrace --no-daemon 2>&1 | tee ci-diagnostics/apk-build.log
+          echo "stage=apk_build_ok" >> ci-diagnostics/stages.log
 
       - name: Upload CI diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: guardian-ci-diagnostics
-          if-no-files-found: ignore
+          if-no-files-found: error
           path: |
-            core-security-test.log
-            apk-build.log
+            ci-diagnostics/**
             **/build/reports/**
 
       - name: Upload debug APK
