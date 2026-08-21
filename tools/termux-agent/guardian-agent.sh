@@ -101,7 +101,7 @@ process_issue() {
   local title="$2"
   local author="$3"
   local body_b64="$4"
-  local body action started logfile rc excerpt comment
+  local body action started logfile rc excerpt comment reject_body start_body
 
   [ "$author" = "$OWNER" ] || { log "skip #$number author=$author"; return 0; }
   body="$(printf '%s' "$body_b64" | base64 -d 2>/dev/null || true)"
@@ -112,7 +112,8 @@ process_issue() {
   case "$action" in
     ping|status|sync|test|build|build_test|build_open|launch|lock) ;;
     *)
-      gh issue comment "$number" --repo "$REPO" --body "GUARDIAN_AGENT_RESULT\nstatus=REJECTED\naction=$action\nreason=action_not_allowed" >/dev/null 2>&1 || true
+      reject_body="$(printf 'GUARDIAN_AGENT_RESULT\nstatus=REJECTED\naction=%s\nreason=action_not_allowed\n' "$action")"
+      gh issue comment "$number" --repo "$REPO" --body "$reject_body" >/dev/null 2>&1 || true
       gh issue close "$number" --repo "$REPO" >/dev/null 2>&1 || true
       return 0
       ;;
@@ -122,12 +123,14 @@ process_issue() {
   logfile="$LOGDIR/issue-${number}-${action}-$(date +%Y%m%d-%H%M%S).log"
   log "start #$number action=$action title=$title"
 
-  gh issue comment "$number" --repo "$REPO" --body "GUARDIAN_AGENT_STARTED\naction=$action\ntime=$started" >/dev/null 2>&1 || true
+  start_body="$(printf 'GUARDIAN_AGENT_STARTED\naction=%s\ntime=%s\n' "$action" "$started")"
+  gh issue comment "$number" --repo "$REPO" --body "$start_body" >/dev/null 2>&1 || true
 
-  set +e
-  run_action "$action" >"$logfile" 2>&1
-  rc=$?
-  set -e
+  if run_action "$action" >"$logfile" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
 
   excerpt="$(tail -c 12000 "$logfile" 2>/dev/null || true)"
   comment="$STATE/comment-$number.txt"
