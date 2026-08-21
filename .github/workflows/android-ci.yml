@@ -37,7 +37,32 @@ jobs:
           gradle-version: '8.13'
 
       - name: Unit tests
-        run: gradle :core-security:test --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :core-security:test --stacktrace --no-daemon 2>&1 | tee core-security-test.log
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace --no-daemon 2>&1 | tee apk-build.log
+
+      - name: Upload CI diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardian-ci-diagnostics
+          if-no-files-found: ignore
+          path: |
+            core-security-test.log
+            apk-build.log
+            **/build/reports/**
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-guardian-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
