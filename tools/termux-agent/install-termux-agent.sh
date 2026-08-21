@@ -14,13 +14,16 @@ GRADLE_ZIP="$HOME/.cache/guardian-agent/gradle-8.13-bin.zip"
 GRADLE_SHA_URL="https://services.gradle.org/distributions/gradle-8.13-bin.zip.sha256"
 GRADLE_URL="https://services.gradle.org/distributions/gradle-8.13-bin.zip"
 SERVICE="$PREFIX/var/service/guardian-agent"
+JAVA_HOME_TERMUX="$PREFIX/lib/jvm/java-21-openjdk"
 
 say() { printf '\n== %s ==\n' "$1"; }
 fail() { printf '\nBŁĄD: %s\n' "$1" >&2; exit 1; }
 
 say "Pakiety Termux"
 pkg update -y
-pkg install -y git gh jq curl unzip coreutils openjdk-17 openjdk-21 aapt2 apksigner d8 termux-services
+pkg install -y git gh jq curl unzip coreutils openjdk-21 aapt2 apksigner d8 termux-services
+
+[ -x "$JAVA_HOME_TERMUX/bin/java" ] || fail "Brak działającego OpenJDK 21."
 
 mkdir -p "$AGENT_HOME" "$STATE/logs" "$HOME/.cache/guardian-agent" "$HOME/.local/opt" "$SDK/platforms" "$SDK/build-tools"
 
@@ -101,7 +104,7 @@ cat > "$SERVICE/run" <<EOF_RUN
 #!$PREFIX/bin/sh
 export HOME="$HOME"
 export PREFIX="$PREFIX"
-export PATH="$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:/system/bin"
+export PATH="$JAVA_HOME_TERMUX/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:/system/bin"
 exec "$AGENT_HOME/guardian-agent.sh"
 EOF_RUN
 chmod 700 "$SERVICE/run"
@@ -149,11 +152,10 @@ BASHRC
 fi
 
 say "Weryfikacja"
-JAVA_HOME="$PREFIX/lib/jvm/java-17-openjdk" GRADLE_OPTS='-Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false' "$GRADLE_HOME/bin/gradle" --version | sed -n '1,12p'
-"$PREFIX/lib/jvm/java-17-openjdk/bin/java" -version 2>&1 | head -n2
+"$JAVA_HOME_TERMUX/bin/java" -version 2>&1 | head -n2
 aapt2 version 2>&1 | head -n1
 gh auth status -h github.com
 printf '\nAgent: %s\n' "$AGENT_HOME/guardian-agent.sh"
 printf 'Log:   %s\n' "$STATE/agent.log"
 printf 'Repo:  %s (%s)\n' "$PROJECT" "$BRANCH"
-printf '\nGOTOWE. Agent używa JDK 17 i Gradle bez native services.\n'
+printf '\nGOTOWE. Agent używa JDK 21; test Gradle wykonamy zdalnie przez kolejkę.\n'
