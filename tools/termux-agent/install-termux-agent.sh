@@ -119,10 +119,28 @@ fi
 rm -f "$SERVICE/down"
 sv up guardian-agent >/dev/null 2>&1 || sv up "$SERVICE" >/dev/null 2>&1 || true
 
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/guardian-agent-start" <<'CTL'
+#!/data/data/com.termux/files/usr/bin/bash
+sv up guardian-agent 2>/dev/null || sv up "$PREFIX/var/service/guardian-agent"
+CTL
+cat > "$HOME/.local/bin/guardian-agent-stop" <<'CTL'
+#!/data/data/com.termux/files/usr/bin/bash
+sv down guardian-agent 2>/dev/null || sv down "$PREFIX/var/service/guardian-agent"
+CTL
+cat > "$HOME/.local/bin/guardian-agent-status" <<'CTL'
+#!/data/data/com.termux/files/usr/bin/bash
+sv status guardian-agent 2>/dev/null || sv status "$PREFIX/var/service/guardian-agent" || true
+printf '\nOstatnie wpisy:\n'
+tail -n 30 "$HOME/.local/state/guardian-agent/agent.log" 2>/dev/null || true
+CTL
+chmod 700 "$HOME/.local/bin/guardian-agent-start" "$HOME/.local/bin/guardian-agent-stop" "$HOME/.local/bin/guardian-agent-status"
+
 MARKER="# guardian-agent-autostart"
 if ! grep -qF "$MARKER" "$HOME/.bashrc" 2>/dev/null; then
   cat >> "$HOME/.bashrc" <<'BASHRC'
 # guardian-agent-autostart
+export PATH="$HOME/.local/bin:$PATH"
 if [ -f "$PREFIX/etc/profile.d/start-services.sh" ]; then
   . "$PREFIX/etc/profile.d/start-services.sh" >/dev/null 2>&1 || true
 fi
