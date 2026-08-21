@@ -20,7 +20,7 @@ fail() { printf '\nBŁĄD: %s\n' "$1" >&2; exit 1; }
 
 say "Pakiety Termux"
 pkg update -y
-pkg install -y git gh jq curl unzip coreutils openjdk-21 aapt2 apksigner d8 termux-services
+pkg install -y git gh jq curl unzip coreutils openjdk-17 openjdk-21 aapt2 apksigner d8 termux-services
 
 mkdir -p "$AGENT_HOME" "$STATE/logs" "$HOME/.cache/guardian-agent" "$HOME/.local/opt" "$SDK/platforms" "$SDK/build-tools"
 
@@ -36,9 +36,8 @@ gh repo view "$REPO" >/dev/null 2>&1 || fail "To konto GitHub nie ma dostępu do
 say "Repo Guardiana"
 if [ -d "$PROJECT/.git" ]; then
   git -C "$PROJECT" fetch origin "$BRANCH"
-  if [ -n "$(git -C "$PROJECT" status --porcelain)" ]; then
-    fail "W $PROJECT są lokalne zmiany. Nie nadpisuję ich automatycznie."
-  fi
+  dirty="$(git -C "$PROJECT" status --porcelain --untracked-files=all | grep -vE '^\?\? local\.properties$|^ M local\.properties$' || true)"
+  [ -z "$dirty" ] || fail "W $PROJECT są lokalne zmiany inne niż local.properties."
   git -C "$PROJECT" checkout "$BRANCH"
   git -C "$PROJECT" pull --ff-only origin "$BRANCH"
 else
@@ -119,7 +118,7 @@ if [ -f "$PREFIX/etc/profile.d/start-services.sh" ]; then
 fi
 
 rm -f "$SERVICE/down"
-sv up guardian-agent >/dev/null 2>&1 || sv up "$SERVICE" >/dev/null 2>&1 || true
+sv restart guardian-agent >/dev/null 2>&1 || sv restart "$SERVICE" >/dev/null 2>&1 || sv up "$SERVICE" >/dev/null 2>&1 || true
 
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/guardian-agent-start" <<'CTL'
@@ -150,11 +149,11 @@ BASHRC
 fi
 
 say "Weryfikacja"
-"$GRADLE_HOME/bin/gradle" --version | sed -n '1,12p'
-java -version 2>&1 | head -n2
+JAVA_HOME="$PREFIX/lib/jvm/java-17-openjdk" GRADLE_OPTS='-Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false' "$GRADLE_HOME/bin/gradle" --version | sed -n '1,12p'
+"$PREFIX/lib/jvm/java-17-openjdk/bin/java" -version 2>&1 | head -n2
 aapt2 version 2>&1 | head -n1
 gh auth status -h github.com
 printf '\nAgent: %s\n' "$AGENT_HOME/guardian-agent.sh"
 printf 'Log:   %s\n' "$STATE/agent.log"
 printf 'Repo:  %s (%s)\n' "$PROJECT" "$BRANCH"
-printf '\nGOTOWE. Od tej chwili zadania [TERMUX] z prywatnego repo są obsługiwane przez whitelistę agenta.\n'
+printf '\nGOTOWE. Agent używa JDK 17 i Gradle bez native services.\n'
