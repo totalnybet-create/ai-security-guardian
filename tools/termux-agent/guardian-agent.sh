@@ -11,9 +11,9 @@ STATE="$HOME/.local/state/guardian-agent"
 LOGDIR="$STATE/logs"
 POLL_SECONDS="${GUARDIAN_AGENT_POLL_SECONDS:-30}"
 
-JAVA17="$PREFIX/lib/jvm/java-17-openjdk"
-if [ -x "$JAVA17/bin/java" ]; then
-  export JAVA_HOME="$JAVA17"
+JAVA21="$PREFIX/lib/jvm/java-21-openjdk"
+if [ -x "$JAVA21/bin/java" ]; then
+  export JAVA_HOME="$JAVA21"
   export PATH="$JAVA_HOME/bin:$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
 else
   export PATH="$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
@@ -22,7 +22,7 @@ fi
 export ANDROID_HOME="$HOME/android-sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export GH_PAGER=cat
-export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false"
+export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false -Dorg.gradle.internal.native=false"
 
 mkdir -p "$LOGDIR"
 
@@ -32,13 +32,14 @@ log() {
 
 gradle_guardian() {
   cd "$PROJECT" || return 1
-  "$GRADLE" \
+  JAVA_HOME="$JAVA_HOME" "$GRADLE" \
     --no-daemon \
     --stacktrace \
     --max-workers=2 \
     -Dorg.gradle.native=false \
+    -Dorg.gradle.internal.native=false \
     -Dorg.gradle.vfs.watch=false \
-    -Dorg.gradle.jvmargs='-Xmx1536m -Dfile.encoding=UTF-8 -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false' \
+    -Dorg.gradle.jvmargs='-Xmx1536m -Dfile.encoding=UTF-8 -Dorg.gradle.native=false -Dorg.gradle.internal.native=false -Dorg.gradle.vfs.watch=false' \
     -Pandroid.aapt2FromMavenOverride="$PREFIX/bin/aapt2" \
     "$@"
 }
@@ -75,7 +76,6 @@ action_status() {
   echo "android_home=$ANDROID_HOME"
   echo "java_home=${JAVA_HOME:-system}"
   echo "java=$(java -version 2>&1 | head -n1)"
-  echo "gradle=$($GRADLE --version 2>/dev/null | awk '/Gradle /{print $2; exit}')"
   echo "aapt2=$(aapt2 version 2>&1 | head -n1)"
   if [ -d "$PROJECT/.git" ]; then
     echo "commit=$(git -C "$PROJECT" rev-parse --short HEAD 2>/dev/null || true)"
