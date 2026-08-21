@@ -6,42 +6,19 @@ OWNER="totalnybet-create"
 PROJECT="$HOME/ai-security-guardian"
 BRANCH="work/termux-agent"
 AGENT_HOME="$HOME/.local/share/guardian-agent"
-GRADLE="$HOME/.local/opt/gradle-8.13/bin/gradle"
 STATE="$HOME/.local/state/guardian-agent"
 LOGDIR="$STATE/logs"
+ARTIFACT_DIR="$STATE/artifacts"
 POLL_SECONDS="${GUARDIAN_AGENT_POLL_SECONDS:-30}"
+WORKFLOW="android-ci.yml"
 
-JAVA21="$PREFIX/lib/jvm/java-21-openjdk"
-if [ -x "$JAVA21/bin/java" ]; then
-  export JAVA_HOME="$JAVA21"
-  export PATH="$JAVA_HOME/bin:$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
-else
-  export PATH="$HOME/.local/bin:$HOME/.local/opt/gradle-8.13/bin:$PREFIX/bin:$PATH"
-fi
-
-export ANDROID_HOME="$HOME/android-sdk"
-export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$HOME/.local/bin:$PREFIX/bin:/system/bin:$PATH"
 export GH_PAGER=cat
-export GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false -Dorg.gradle.internal.native=false"
 
-mkdir -p "$LOGDIR"
+mkdir -p "$LOGDIR" "$ARTIFACT_DIR"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$STATE/agent.log"
-}
-
-gradle_guardian() {
-  cd "$PROJECT" || return 1
-  JAVA_HOME="$JAVA_HOME" "$GRADLE" \
-    --no-daemon \
-    --stacktrace \
-    --max-workers=2 \
-    -Dorg.gradle.native=false \
-    -Dorg.gradle.internal.native=false \
-    -Dorg.gradle.vfs.watch=false \
-    -Dorg.gradle.jvmargs='-Xmx1536m -Dfile.encoding=UTF-8 -Dorg.gradle.native=false -Dorg.gradle.internal.native=false -Dorg.gradle.vfs.watch=false' \
-    -Pandroid.aapt2FromMavenOverride="$PREFIX/bin/aapt2" \
-    "$@"
 }
 
 repo_dirty_nonlocal() {
@@ -73,15 +50,102 @@ action_status() {
   echo "repo=$REPO"
   echo "branch=$BRANCH"
   echo "project=$PROJECT"
-  echo "android_home=$ANDROID_HOME"
-  echo "java_home=${JAVA_HOME:-system}"
-  echo "java=$(java -version 2>&1 | head -n1)"
-  echo "aapt2=$(aapt2 version 2>&1 | head -n1)"
+  echo "build_backend=github-actions"
+  echo "workflow=$WORKFLOW"
+  echo "gh=$(gh --version 2>/dev/null | head -n1 || true)"
   if [ -d "$PROJECT/.git" ]; then
     echo "commit=$(git -C "$PROJECT" rev-parse --short HEAD 2>/dev/null || true)"
     echo "dirty_nonlocal=$(test -n "$(cd "$PROJECT" && repo_dirty_nonlocal)" && echo yes || echo no)"
   fi
   df -h "$HOME" | tail -n1
+}
+
+latest_branch_run_id() {
+  gh run list \
+    --repo "$REPO" \
+    --workflow "$WORKFLOW" \
+    --branch "$BRANCH" \
+    --limit 1 \
+    --json databaseId \
+    --jq '.[0].databaseId // empty'
+}
+
+remote_ci() {
+  local before after tries
+  before="$(latest_branch_run_id 2>/dev/null || true)"
+
+  gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$BRANCH"
+
+  after=""
+  tries=0
+  while [ "$tries" -lt 30 ]; do
+    sleep 2
+    after="$(latest_branch_run_id 2>/dev/null || true)"
+    if [ -n "$after" ] && [ "$after" != "$before" ]; then
+      break
+    fi
+    tries=$((tries + 1))
+  done
+
+  [ -n "$after" ] || {
+    echo "Nie udało się ustalić ID uruchomienia GitHub Actions."
+    return 1
+  }
+
+  echo "github_run_id=$after"
+  gh run watch "$after" --repo "$REPO" --exit-status
+  gh run view "$after" --repo "$REPO" --json status,conclusion,url,headSha \
+    --jq '"status=\(.status) conclusion=\(.conclusion) sha=\(.headSha) url=\(.url)"'
+  printf '%s\n' "$after"
+}
+
+download_apk_from_run() {
+  local run_id="$1" out apk download_dir
+  download_dir="$ARTIFACT_DIR/$run_id"
+  rm -rf "$download_dir"
+  mkdir -p "$download_dir"
+
+  gh run download "$run_id" \
+    --repo "$REPO" \
+    --name ai-security-guardian-debug-apk \
+    --dir "$download_dir"
+
+  apk="$(find "$download_dir" -type f -name '*.apk' | head -n1)"
+  [ -n "$apk" ] || {
+    echo "GitHub Actions zakończył się bez artefaktu APK."
+    return 1
+  }
+
+  if [ -d "$HOME/storage/downloads" ]; then
+    out="$HOME/storage/downloads/AI-Security-Guardian-debug.apk"
+  else
+    out="$HOME/AI-Security-Guardian-debug.apk"
+  fi
+  cp -f "$apk" "$out"
+  echo "apk=$out"
+  printf '%s\n' "$out"
+}
+
+action_remote_build() {
+  local run_id
+  run_id="$(remote_ci | tee /dev/stderr | tail -n1)" || return $?
+  [ -n "$run_id" ] || return 1
+  download_apk_from_run "$run_id" >/dev/null
+  echo "build=success"
+  echo "run_id=$run_id"
+}
+
+action_remote_build_open() {
+  local run_id apk
+  run_id="$(remote_ci | tee /dev/stderr | tail -n1)" || return $?
+  [ -n "$run_id" ] || return 1
+  apk="$(download_apk_from_run "$run_id" | tail -n1)" || return $?
+  echo "apk=$apk"
+  if command -v termux-open >/dev/null 2>&1; then
+    termux-open "$apk"
+  else
+    echo "termux-open niedostępny; APK zapisany powyżej."
+  fi
 }
 
 run_action() {
@@ -90,10 +154,8 @@ run_action() {
     status) action_status ;;
     sync) action_sync ;;
     agent_update) action_agent_update ;;
-    test) gradle_guardian :core-security:test ;;
-    build) gradle_guardian :app:assembleDebug ;;
-    build_test) gradle_guardian :core-security:test :app:assembleDebug ;;
-    build_open) gradle_guardian :app:assembleDebug && termux-open "$PROJECT/app/build/outputs/apk/debug/app-debug.apk" ;;
+    test|build|build_test) action_remote_build ;;
+    build_open) action_remote_build_open ;;
     launch) am start -n pl.siedlar.securityguardian/.MainActivity ;;
     lock) am start -n pl.siedlar.securityguardian/.LockNowActivity ;;
     *) echo "Odrzucono niedozwoloną akcję: $1"; return 64 ;;
@@ -154,7 +216,7 @@ process_issue() {
 }
 
 main_loop() {
-  log "agent-start poll=${POLL_SECONDS}s java_home=${JAVA_HOME:-system}"
+  log "agent-start poll=${POLL_SECONDS}s build_backend=github-actions"
   while true; do
     if ! gh auth status -h github.com >/dev/null 2>&1; then
       log "github-auth-missing"
