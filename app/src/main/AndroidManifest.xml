@@ -21,6 +21,30 @@
         android:theme="@style/Theme.SecurityGuardian"
         android:usesCleartextTraffic="false">
 
+        <receiver
+            android:name=".GuardianDeviceAdminReceiver"
+            android:exported="true"
+            android:label="Zablokuj telefon"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_receiver" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".LockNowActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="Zablokuj telefon">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".CopilotActivity"
             android:exported="false" />
