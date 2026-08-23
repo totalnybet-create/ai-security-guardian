@@ -7,6 +7,12 @@ on:
     paths:
       - 'nexus-prank-android/**'
       - '.github/workflows/nexus-prank-apk.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'nexus-prank-android/**'
+      - '.github/workflows/nexus-prank-apk.yml'
   workflow_dispatch:
 
 jobs:
