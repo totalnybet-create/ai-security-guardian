@@ -86,7 +86,7 @@ class AndroidAppInspector(
     ): AppSnapshot {
         val appInfo = requireNotNull(packageInfo.applicationInfo)
         val requestedPermissions = packageInfo.requestedPermissions?.toSet().orEmpty()
-        val requestedFlags = packageInfo.requestedPermissionsFlags.orEmpty()
+        val requestedFlags = packageInfo.requestedPermissionsFlags ?: IntArray(0)
 
         val grantedPermissions = packageInfo.requestedPermissions
             ?.mapIndexedNotNull { index, permission ->
