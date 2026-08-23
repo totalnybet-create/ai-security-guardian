@@ -27,4 +27,5 @@ kotlin {
 
 dependencies {
     implementation(project(":malware-core"))
+    implementation(project(":core-security"))
 }
