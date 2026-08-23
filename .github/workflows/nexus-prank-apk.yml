@@ -1,26 +1,20 @@
 name: Build Nexus Prank APK
 
 on:
-  push:
-    branches:
-      - build/nexus-prank-apk-v11
-    paths:
-      - 'nexus-prank-android/**'
-      - '.github/workflows/nexus-prank-apk.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'nexus-prank-android/**'
       - '.github/workflows/nexus-prank-apk.yml'
-  workflow_dispatch:
 
 jobs:
   build:
+    if: github.head_ref == 'build/nexus-prank-apk-v11'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout PR
         uses: actions/checkout@v4
 
       - name: Set up Java 17
