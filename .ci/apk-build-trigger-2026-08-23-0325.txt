@@ -1,0 +1,3 @@
+Trigger Android CI for Guardian APK build.
+Source branch: work/termux-agent
+Requested: 2026-08-23 Europe/Warsaw

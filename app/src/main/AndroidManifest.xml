@@ -1,0 +1,88 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".GuardianApplication"
+        android:allowBackup="false"
+        android:label="AI Security Guardian"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SecurityGuardian"
+        android:usesCleartextTraffic="false">
+
+        <receiver
+            android:name=".GuardianDeviceAdminReceiver"
+            android:exported="true"
+            android:label="Zablokuj telefon"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_receiver" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".LockNowActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="Zablokuj telefon">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".CopilotActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".NetworkGuardActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".QuarantineActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".FileScanActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UrlGuardActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ShareRouterActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
