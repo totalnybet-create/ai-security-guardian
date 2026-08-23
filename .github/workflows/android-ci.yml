@@ -1,0 +1,92 @@
+name: Android CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'work/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize diagnostics
+        shell: bash
+        run: |
+          mkdir -p ci-diagnostics
+          echo "stage=checkout_ok" > ci-diagnostics/stages.log
+          date -u >> ci-diagnostics/stages.log
+          uname -a >> ci-diagnostics/stages.log
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -o pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" 2>&1 | tee ci-diagnostics/sdk-install.log
+          echo "stage=android35_installed" >> ci-diagnostics/stages.log
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Nexus Prank APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle -p nexus-prank-android :app:assembleDebug --stacktrace --no-daemon 2>&1 | tee ci-diagnostics/nexus-apk-build.log
+          echo "stage=nexus_apk_build_ok" >> ci-diagnostics/stages.log
+
+      - name: Verify Nexus APK
+        shell: bash
+        run: |
+          set -o pipefail
+          APK="nexus-prank-android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee ci-diagnostics/apk-badging.log
+          cp "$APK" Nexus-Prank-v11.apk
+          sha256sum Nexus-Prank-v11.apk | tee Nexus-Prank-v11.apk.sha256
+          echo "stage=nexus_apk_verified" >> ci-diagnostics/stages.log
+
+      - name: Upload CI diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-prank-v11-diagnostics
+          retention-days: 14
+          if-no-files-found: error
+          path: ci-diagnostics/**
+
+      - name: Upload Nexus Prank APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-prank-v11-apk
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            Nexus-Prank-v11.apk
+            Nexus-Prank-v11.apk.sha256
